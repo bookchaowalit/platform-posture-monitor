@@ -42,7 +42,8 @@ Sentry waiver: a failed or missed run already alerts through the uptime Worker h
 - Never writes to Cloudflare, Vercel or Railway; the only writes are its R2 state, Telegram and
   audit events.
 - Never resolves a finding on an unreachable host (a failed probe is not a fix).
-- Out of scope (SPEC-001 "Later"): automatic remediation.
+- Out of scope: automatic remediation; it reports and the owner fixes. Planned next (SPEC-001
+  "Later"): a Neon allowlist rule and registry drift against `online-systems.yaml`.
 
 ## Measures
 
