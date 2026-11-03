@@ -4,7 +4,8 @@ import json
 from .checks import SEVERITY_ORDER
 
 ICON = {'high': '🔴', 'medium': '🟠', 'low': '⚪'}
-MAX_LINES = 40  # keeps a baseline message under Telegram's 4096-character limit
+MAX_LINES = 40
+MAX_CHARS = 4000  # Telegram rejects messages over 4096 characters
 
 
 def load_state(text):
@@ -48,7 +49,8 @@ def message(opened, resolved, current, first_run):
         lines += [f'✅ {f["rule"]} {f["subject"]}' for f in resolved]
     if len(lines) > MAX_LINES:
         lines = lines[:MAX_LINES] + [f'… and {len(lines) - MAX_LINES} more']
-    return '\n'.join(lines)
+    text = '\n'.join(lines)
+    return text if len(text) <= MAX_CHARS else text[:MAX_CHARS - 12] + '\n… (cut)'
 
 
 def public_summary(current, opened, resolved):

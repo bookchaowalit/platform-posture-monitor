@@ -29,7 +29,7 @@ finding opens or resolves. A missed run alerts through the uptime Worker heartbe
 | Rule | Severity | Fires when |
 |---|---|---|
 | `tunnel-no-access` | high | a DNS record points to `*.cfargotunnel.com` and no Cloudflare Access app covers the hostname |
-| `dangling-target` | high | a CNAME target does not resolve (subdomain takeover risk) |
+| `dangling-target` | high | a CNAME target is NXDOMAIN (subdomain takeover risk); a resolver error fails the run, and an unreachable web host keeps its previous probe findings |
 | `tls-invalid` | medium | the HTTPS certificate fails verification (expired, wrong name, untrusted) |
 | `tls-expiring` | medium | the certificate is valid but expires in fewer than 21 days (providers renew at 30, so renewal is failing) |
 | `deployment-missing` | medium | Vercel answers `DEPLOYMENT_NOT_FOUND`, or Railway answers "Application not found" |

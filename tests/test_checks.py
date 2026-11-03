@@ -13,7 +13,7 @@ def rec(name, content, rtype='CNAME', proxied=False):
 
 
 def healthy(**kw):
-    base = dict(resolves=True, tls_error=None, cert_not_after=NOW + timedelta(days=60), status=200,
+    base = dict(reachable=True, tls_error=None, cert_not_after=NOW + timedelta(days=60), status=200,
                 vercel_error=None, railway_not_found=False)
     base.update(kw)
     return Probe(**base)
@@ -59,7 +59,7 @@ class ProbeRules(unittest.TestCase):  # AC2
         self.assertEqual(self.run_probe(healthy(status=308)), [])
 
     def test_unresolvable_target_is_dangling(self):
-        self.assertEqual(ids(self.run_probe(healthy(resolves=False, status=None))), ['dangling-target:app.example.com'])
+        self.assertEqual(self.run_probe(healthy(reachable=False, status=None)), [])  # no verdict, no finding
 
     def test_dangling_cname_from_resolver(self):
         found = evaluate([], [], GOOD_ZONE, [], {}, NOW, dangling=['old.example.com'])

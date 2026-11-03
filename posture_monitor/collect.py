@@ -107,14 +107,6 @@ def web_hosts(records):
     return sorted(hosts)
 
 
-def resolves(name):
-    try:
-        socket.getaddrinfo(name, 443, proto=socket.IPPROTO_TCP)
-        return True
-    except socket.gaierror:
-        return False
-
-
 def target_exists(name):
     """False only for NXDOMAIN. A target with just TXT/MX records (mail, DKIM) still exists."""
     url = f'{DOH}?{urllib.parse.urlencode({"name": name, "type": "A"})}'
@@ -139,8 +131,12 @@ def dangling_cnames(records, exists=target_exists):
 
 
 def probe(host):
-    if not resolves(host):
-        return Probe(False, None, None, None, None, False)
+    unreachable = Probe(False, None, None, None, None, False)
+    try:
+        socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        # Could be a transient resolver failure; NXDOMAIN targets are caught by dangling_cnames.
+        return unreachable
     ctx = ssl.create_default_context()
     conn = http.client.HTTPSConnection(host, timeout=TIMEOUT, context=ctx)
     try:
@@ -152,7 +148,7 @@ def probe(host):
         return Probe(True, exc.verify_message or 'verify-failed', None, None, None, False)
     except (OSError, http.client.HTTPException) as exc:
         # Unreachable is availability (uptime monitor), not posture: no TLS verdict, no finding.
-        return Probe(True, None, None, None, None, False) if not isinstance(exc, ssl.SSLError) \
+        return unreachable if not isinstance(exc, ssl.SSLError) \
             else Probe(True, type(exc).__name__, None, None, None, False)
     finally:
         conn.close()

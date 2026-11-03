@@ -7,7 +7,7 @@ import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .checks import evaluate
+from .checks import PROBE_RULES, Finding, evaluate
 from .collect import Cloudflare, ProviderError, dangling_cnames, probe_all, web_hosts
 from .report import diff, dump_state, load_state, message, public_summary
 
@@ -19,7 +19,16 @@ def live_findings(env):
                     env.get('POSTURE_ZONE', 'bookchaowalit.com'))
     records, access, zone, workers_dev = cf.inventory()
     probes = probe_all(web_hosts(records))
-    return evaluate(records, access, zone, workers_dev, probes, datetime.now(UTC), dangling_cnames(records))
+    found = evaluate(records, access, zone, workers_dev, probes, datetime.now(UTC), dangling_cnames(records))
+    return found, {host for host, p in probes.items() if not p.reachable}
+
+
+def carry_forward(previous, current, unknown):
+    """Keep probe findings for hosts with no verdict this run, so an outage never resolves them."""
+    have = {f.id for f in current}
+    kept = [Finding(f['rule'], f['severity'], f['subject']) for f in previous.values()
+            if f['subject'] in unknown and f['rule'] in PROBE_RULES and f['id'] not in have]
+    return current + kept
 
 
 def telegram(env):
@@ -37,13 +46,14 @@ def telegram(env):
 def run(state_in, state_out, findings_fn, send, out=sys.stdout):
     """Returns the exit code. State is written only after a complete inventory and a sent alert."""
     try:
-        current = findings_fn()
+        current, unknown = findings_fn()
     except ProviderError as exc:
         # Public log: the failing endpoint path and error type only, never a hostname.
         print(json.dumps({'status': 'provider_failed', 'error': str(exc)}), file=out)
         return PROVIDER_FAILED
     previous_text = state_in.read_text() if state_in.exists() else ''
     previous = load_state(previous_text)
+    current = carry_forward(previous or {}, current, unknown)
     opened, resolved = diff(previous or {}, current)
     text = message(opened, resolved, current, first_run=previous is None)
     if text:

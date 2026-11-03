@@ -25,6 +25,10 @@ class Diff(unittest.TestCase):  # AC4
         self.assertLess(text.index('vault.example.com'), text.index('zone-caa'))
         self.assertIn('old.example.com', text)
 
+    def test_message_stays_under_telegram_limit(self):
+        long = [Finding('tls-invalid', 'medium', 'x' * 200 + f'{i}.example.com') for i in range(39)]
+        self.assertLessEqual(len(message(long, [], long, first_run=True)), 4000)
+
     def test_first_run_sends_baseline(self):
         text = message([A, B], [], [A, B], first_run=True)
         self.assertIn('baseline', text.lower())

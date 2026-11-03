@@ -6,6 +6,7 @@ from typing import NamedTuple
 SEVERITY_ORDER = {'high': 0, 'medium': 1, 'low': 2}
 EXPIRY_WARNING = timedelta(days=21)  # providers renew at 30 days; under 21 means renewal is failing
 TLS_VERSIONS = ('1.0', '1.1', '1.2', '1.3')
+PROBE_RULES = frozenset({'tls-invalid', 'tls-expiring', 'deployment-missing', 'deployment-paused'})
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,7 @@ class ZoneSettings(NamedTuple):
 
 
 class Probe(NamedTuple):
-    resolves: bool                 # the hostname resolves to an address
+    reachable: bool                # False: no verdict this run (DNS or network failure)
     tls_error: str | None          # certificate verification failure, if any
     cert_not_after: datetime | None
     status: int | None             # HTTP status of one GET without following redirects
@@ -59,8 +60,7 @@ def _tunnel_rules(records, access_domains):
 
 
 def _probe_rules(host, p, now):
-    if not p.resolves:
-        yield Finding('dangling-target', 'high', host)
+    if not p.reachable:
         return
     if p.tls_error:
         yield Finding('tls-invalid', 'medium', host)
