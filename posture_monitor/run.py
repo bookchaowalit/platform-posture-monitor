@@ -45,9 +45,13 @@ def telegram(env):
 
 
 def run(state_in, state_out, findings_fn, send, out=sys.stdout, audit=None):
-    """Returns the exit code. A provider or audit failure writes no state, so the run is retried
-    whole. Once the audit holds the transitions, state is written even if Telegram fails, with
-    the unsent text kept as `pending_message` and sent first next run."""
+    """Returns the exit code.
+
+    Only a failed inventory writes no state (nothing is known, so nothing may resolve). Otherwise the
+    state is always written: audit events that could not be posted stay in `pending_audit` and
+    alerts that could not be sent in `pending_messages`, both retried first next run. A non-zero
+    exit still reports the failure through the heartbeat.
+    """
     try:
         current, unknown = findings_fn()
     except ProviderError as exc:
@@ -56,27 +60,34 @@ def run(state_in, state_out, findings_fn, send, out=sys.stdout, audit=None):
         return PROVIDER_FAILED
     previous_text = state_in.read_text() if state_in.exists() else ''
     previous = load_state(previous_text)
-    generation, pending = load_meta(previous_text)
+    generation, pending_messages, pending_audit = load_meta(previous_text)
     current = carry_forward(previous or {}, current, unknown)
     opened, resolved = diff(previous or {}, current)
-    if audit:
-        try:
-            audit(opened, resolved, generation)  # idempotent per state generation, safe to retry
-        except ProviderError as exc:
-            print(json.dumps({'status': 'audit_failed', 'error': str(exc)}), file=out)
-            return PROVIDER_FAILED
+
+    events = pending_audit + [{'change': 'opened', 'id': f.id, 'generation': generation} for f in opened] + \
+        [{'change': 'resolved', 'id': f['id'], 'generation': generation} for f in resolved]
+    unposted = audit(events) if audit else []
+
+    queue = list(pending_messages)
     text = message(opened, resolved, current, first_run=previous is None)
-    text = '\n\n'.join(t for t in (pending, text) if t) or None
     if text:
+        queue.append(text)
+    unsent = []
+    for n, item in enumerate(queue):
         try:
-            send(text)
-        except Exception as exc:  # noqa: BLE001  the alert is kept in state and retried next run
-            state_out.write_text(dump_state(current, generation + 1, pending_message=text))
-            print(json.dumps({'status': 'notify_failed', 'error': type(exc).__name__}), file=out)
-            return NOTIFY_FAILED
-    state_out.write_text(dump_state(current, generation + 1))
-    print(public_summary(current, len(opened), len(resolved)), file=out)
-    return OK
+            send(item)
+        except Exception:  # noqa: BLE001  kept in state, retried next run
+            unsent = queue[n:]
+            break
+
+    state_out.write_text(dump_state(current, generation + 1, pending_messages=unsent, pending_audit=unposted))
+    summary = json.loads(public_summary(current, len(opened), len(resolved)))
+    if unposted:
+        summary['status'], summary['audit_pending'] = 'audit_failed', len(unposted)
+    if unsent:
+        summary['status'], summary['alerts_pending'] = summary.get('status', 'notify_failed'), len(unsent)
+    print(json.dumps(summary), file=out)
+    return PROVIDER_FAILED if unposted else NOTIFY_FAILED if unsent else OK
 
 
 def main(argv=None):

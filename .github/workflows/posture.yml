@@ -56,9 +56,10 @@ jobs:
               2>> "$RUNNER_TEMP/stderr.log" | tee -a "$GITHUB_STEP_SUMMARY"
             code=${PIPESTATUS[0]}
           fi
-          # Exit 3 (Telegram failed) still writes state: the audit holds the transitions and the
-          # unsent alert is kept as pending_message for the next run.
-          if [ "$code" -eq 0 ] || { [ "$code" -eq 3 ] && [ -f "$RUNNER_TEMP/current.json" ]; }; then
+          # The monitor writes current.json after every complete inventory, including runs whose audit
+          # (exit 2) or Telegram (exit 3) step failed: the unposted events and unsent alerts are kept
+          # in it and retried first next run. A failed inventory writes nothing, so nothing resolves.
+          if [ -f "$RUNNER_TEMP/current.json" ]; then
             python -m posture_monitor.r2 put state.json "$RUNNER_TEMP/current.json" 2>> "$RUNNER_TEMP/stderr.log" || code=2
           fi
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"

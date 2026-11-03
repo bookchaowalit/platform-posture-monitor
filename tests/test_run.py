@@ -48,13 +48,31 @@ class Run(unittest.TestCase):
         self.assertEqual(self.go(lambda: ([A, B], set()), send=refuse), NOTIFY_FAILED)
         state = json.loads(self.state_out.read_text())
         self.assertEqual(state['generation'], 5)
-        self.assertIn('zone-caa', state['pending_message'])
-        # next run: nothing new, but the pending alert goes out first and is then cleared
+        self.assertIn('zone-caa', state['pending_messages'][0])
+        # next run: nothing new, the pending alert goes out on its own and is then cleared
         self.state_in.write_text(self.state_out.read_text())
         self.assertEqual(self.go(lambda: ([A, B], set())), OK)
         self.assertEqual(len(self.sent), 1)
         self.assertIn('zone-caa', self.sent[0])
-        self.assertNotIn('pending_message', json.loads(self.state_out.read_text()))
+        self.assertNotIn('pending_messages', json.loads(self.state_out.read_text()))
+
+    def test_pending_alerts_stay_separate_bounded_messages(self):
+        long = Finding('tls-invalid', 'medium', 'x' * 3900 + '.example.com')
+        self.state_in.write_text(dump_state([A], pending_messages=['p' * 3990]))
+        self.go(lambda: ([A, long], set()))
+        self.assertEqual(len(self.sent), 2)  # pending first, then the new alert, never joined
+        self.assertTrue(all(len(m) <= 4000 for m in self.sent))
+
+    def test_pending_queue_is_capped(self):
+        def refuse(text):
+            raise OSError('telegram down')
+        state = dump_state([A], pending_messages=[f'old {i}' for i in range(20)])
+        self.state_in.write_text(state)
+        self.go(lambda: ([A, B], set()), send=refuse)
+        pending = json.loads(self.state_out.read_text())['pending_messages']
+        self.assertEqual(len(pending), 5)
+        self.assertIn('older undelivered alerts were dropped', pending[0])
+        self.assertIn('zone-caa', pending[-1])
 
     def test_generation_advances_with_every_written_state(self):
         self.state_in.write_text(dump_state([A], generation=7))
@@ -68,22 +86,36 @@ class Run(unittest.TestCase):
         self.assertEqual(self.sent, [])  # nothing resolved
         self.assertIn(tls.id, self.state_out.read_text())
 
-    def test_audit_failure_keeps_state_and_sends_nothing(self):
-        def broken(opened, resolved, generation):
-            raise ProviderError('/v1/audit: HTTPError')
-        self.state_in.write_text(dump_state([A]))
-        code = run(self.state_in, self.state_out, lambda: ([A, B], set()), self.sent.append, out=self.out,
-                   audit=broken)
-        self.assertEqual(code, PROVIDER_FAILED)
-        self.assertEqual(self.sent, [])
-        self.assertFalse(self.state_out.exists())
+    def test_failed_audit_events_are_kept_with_their_generation_and_retried_first(self):
+        posted = []
 
-    def test_audit_gets_the_changes(self):
+        def flaky(events):
+            posted.extend(events[:1])
+            return events[1:]  # the second event failed
+
+        tls = Finding('tls-invalid', 'medium', 'old.example.com')
+        self.state_in.write_text(dump_state([A, tls], generation=3))
+        code = run(self.state_in, self.state_out, lambda: ([A, B], set()), self.sent.append, out=self.out,
+                   audit=flaky)
+        self.assertEqual(code, PROVIDER_FAILED)
+        state = json.loads(self.state_out.read_text())
+        self.assertEqual(state['pending_audit'], [{'change': 'resolved', 'id': tls.id, 'generation': 3}])
+        self.assertEqual(len(self.sent), 1)  # the alert still goes out
+        # next run: the finding set is unchanged, but the unposted transition is posted first
+        self.state_in.write_text(self.state_out.read_text())
         seen = []
-        self.state_in.write_text(dump_state([A]))
+        code = run(self.state_in, self.state_out, lambda: ([A, B], set()), self.sent.append, out=self.out,
+                   audit=lambda events: seen.extend(events) or [])
+        self.assertEqual(code, OK)
+        self.assertEqual(seen, [{'change': 'resolved', 'id': tls.id, 'generation': 3}])
+        self.assertNotIn('pending_audit', json.loads(self.state_out.read_text()))
+
+    def test_audit_gets_the_changes_with_the_current_generation(self):
+        seen = []
+        self.state_in.write_text(dump_state([A], generation=2))
         run(self.state_in, self.state_out, lambda: ([A, B], set()), self.sent.append, out=self.out,
-            audit=lambda o, r, g: seen.append(([f.id for f in o], r, g)))
-        self.assertEqual(seen, [([B.id], [], 0)])
+            audit=lambda events: seen.extend(events) or [])
+        self.assertEqual(seen, [{'change': 'opened', 'id': B.id, 'generation': 2}])
 
     def test_public_output_has_no_hostname(self):  # AC6
         self.go(lambda: ([A, B], set()))

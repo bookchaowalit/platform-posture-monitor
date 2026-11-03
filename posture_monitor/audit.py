@@ -96,11 +96,22 @@ class AuditSink:
     def __init__(self, token, post=post_event):
         self.token, self.post = token, post
 
-    def __call__(self, opened, resolved, generation):
-        changes = [('opened', f.id) for f in opened] + [('resolved', f['id']) for f in resolved]
-        if not changes:
-            return
-        token = self.token()
-        for change, fid in changes:
-            self.post({'action': f'posture.{change}', 'target': event_target(fid)},
-                      idempotency_key(change, fid, generation), token)
+    def __call__(self, events):
+        """Post events in order; return the ones not posted (from the first failure on).
+
+        Each event is {'change', 'id', 'generation'}; the generation is the one it was first seen in,
+        so a retried event keeps its idempotency key.
+        """
+        if not events:
+            return []
+        try:
+            token = self.token()
+        except ProviderError:
+            return list(events)
+        for n, event in enumerate(events):
+            try:
+                self.post({'action': f'posture.{event["change"]}', 'target': event_target(event['id'])},
+                          idempotency_key(event['change'], event['id'], event['generation']), token)
+            except ProviderError:
+                return list(events[n:])
+        return []

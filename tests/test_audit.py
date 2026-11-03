@@ -63,10 +63,36 @@ class Events(unittest.TestCase):
     def test_sink_posts_one_event_per_change(self):
         calls = []
         sink = AuditSink(token=lambda: 'T', post=lambda body, key, token: calls.append((body, key, token)))
-        sink([A], [Finding('zone-caa', 'low', 'zone').as_dict()], generation=0)
+        left = sink([{'change': 'opened', 'id': A.id, 'generation': 0},
+                     {'change': 'resolved', 'id': 'zone-caa:zone', 'generation': 0}])
+        self.assertEqual(left, [])
         self.assertEqual([c[0]['action'] for c in calls], ['posture.opened', 'posture.resolved'])
         self.assertEqual(calls[0][0]['target'], 'tunnel-no-access.vault.example.com')
         self.assertEqual(calls[0][2], 'T')
+
+
+class Partial(unittest.TestCase):
+    def test_returns_the_events_from_the_first_failure_on(self):
+        from posture_monitor.collect import ProviderError
+
+        calls = []
+
+        def post(body, key, token):
+            calls.append(body)
+            if len(calls) == 2:
+                raise ProviderError('/v1/audit: HTTPError')
+
+        events = [{'change': 'opened', 'id': f'r:{i}', 'generation': 1} for i in range(3)]
+        self.assertEqual(AuditSink(token=lambda: 'T', post=post)(events), events[1:])
+
+    def test_token_failure_keeps_everything(self):
+        from posture_monitor.collect import ProviderError
+
+        def no_token():
+            raise ProviderError('/v1/token: HTTPError')
+
+        events = [{'change': 'opened', 'id': 'r:1', 'generation': 1}]
+        self.assertEqual(AuditSink(token=no_token)(events), events)
 
 
 if __name__ == '__main__':

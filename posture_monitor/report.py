@@ -15,18 +15,40 @@ def load_state(text):
     return {f['id']: f for f in json.loads(text)['findings']}
 
 
+MAX_PENDING = 5  # unsent alerts kept for the next run; older ones collapse into a note
+
+
 def load_meta(text):
-    """(generation, pending_message) of a state; a missing or v1 state is generation 0, nothing pending."""
+    """(generation, pending_messages, pending_audit) of a state; missing or older states start empty."""
     if not text.strip():
-        return 0, None
+        return 0, [], []
     data = json.loads(text)
-    return int(data.get('generation', 0)), data.get('pending_message')
+    pending = data.get('pending_messages')
+    if pending is None:  # version 2 kept one string
+        pending = [data['pending_message']] if data.get('pending_message') else []
+    return int(data.get('generation', 0)), [bound(m) for m in pending], list(data.get('pending_audit', []))
 
 
-def dump_state(findings, generation=0, pending_message=None):
-    data = {'version': 2, 'generation': generation, 'findings': [f.as_dict() for f in findings]}
-    if pending_message:
-        data['pending_message'] = pending_message
+def bound(text):
+    """One Telegram message: never over MAX_CHARS, so a long alert can never block the queue."""
+    return text if len(text) <= MAX_CHARS else text[:MAX_CHARS - 12] + '\n… (cut)'
+
+
+def cap_pending(messages):
+    messages = [bound(m) for m in messages]
+    if len(messages) <= MAX_PENDING:
+        return messages
+    dropped = len(messages) - (MAX_PENDING - 1)
+    return [f'Posture monitor: {dropped} older undelivered alerts were dropped; see security-api audit.'] + \
+        messages[-(MAX_PENDING - 1):]
+
+
+def dump_state(findings, generation=0, pending_messages=(), pending_audit=()):
+    data = {'version': 3, 'generation': generation, 'findings': [f.as_dict() for f in findings]}
+    if pending_messages:
+        data['pending_messages'] = cap_pending(list(pending_messages))
+    if pending_audit:
+        data['pending_audit'] = list(pending_audit)
     return json.dumps(data, indent=1) + '\n'
 
 
@@ -60,8 +82,7 @@ def message(opened, resolved, current, first_run):
         lines += [f'✅ {f["rule"]} {f["subject"]}' for f in resolved]
     if len(lines) > MAX_LINES:
         lines = lines[:MAX_LINES] + [f'… and {len(lines) - MAX_LINES} more']
-    text = '\n'.join(lines)
-    return text if len(text) <= MAX_CHARS else text[:MAX_CHARS - 12] + '\n… (cut)'
+    return bound('\n'.join(lines))
 
 
 def public_summary(current, opened, resolved):
