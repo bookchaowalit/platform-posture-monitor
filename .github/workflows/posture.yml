@@ -52,13 +52,14 @@ jobs:
           code=$?
           if [ "$code" -eq 0 ]; then
             # stdout is the counts-only summary; stderr stays in a runner temp file, out of the public log.
-            python -m posture_monitor --state-in "$RUNNER_TEMP/previous.json" --state-out "$RUNNER_TEMP/current.json" \
+            python -m posture_monitor --require-audit --state-in "$RUNNER_TEMP/previous.json" --state-out "$RUNNER_TEMP/current.json" \
               2>> "$RUNNER_TEMP/stderr.log" | tee -a "$GITHUB_STEP_SUMMARY"
             code=${PIPESTATUS[0]}
           fi
-          if [ "$code" -eq 0 ]; then
-            python -m posture_monitor.r2 put state.json "$RUNNER_TEMP/current.json" 2>> "$RUNNER_TEMP/stderr.log"
-            code=$?
+          # Exit 3 (Telegram failed) still writes state: the audit holds the transitions and the
+          # unsent alert is kept as pending_message for the next run.
+          if [ "$code" -eq 0 ] || { [ "$code" -eq 3 ] && [ -f "$RUNNER_TEMP/current.json" ]; }; then
+            python -m posture_monitor.r2 put state.json "$RUNNER_TEMP/current.json" 2>> "$RUNNER_TEMP/stderr.log" || code=2
           fi
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit $code

@@ -41,12 +41,25 @@ class Run(unittest.TestCase):
         self.assertEqual(self.sent, [])
         self.assertTrue(self.state_out.exists())
 
-    def test_notify_failure_keeps_state(self):
+    def test_notify_failure_keeps_the_alert_for_the_next_run(self):
         def refuse(text):
             raise OSError('telegram down')
-        self.state_in.write_text(dump_state([A]))
+        self.state_in.write_text(dump_state([A], generation=4))
         self.assertEqual(self.go(lambda: ([A, B], set()), send=refuse), NOTIFY_FAILED)
-        self.assertFalse(self.state_out.exists())
+        state = json.loads(self.state_out.read_text())
+        self.assertEqual(state['generation'], 5)
+        self.assertIn('zone-caa', state['pending_message'])
+        # next run: nothing new, but the pending alert goes out first and is then cleared
+        self.state_in.write_text(self.state_out.read_text())
+        self.assertEqual(self.go(lambda: ([A, B], set())), OK)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn('zone-caa', self.sent[0])
+        self.assertNotIn('pending_message', json.loads(self.state_out.read_text()))
+
+    def test_generation_advances_with_every_written_state(self):
+        self.state_in.write_text(dump_state([A], generation=7))
+        self.go(lambda: ([A], set()))
+        self.assertEqual(json.loads(self.state_out.read_text())['generation'], 8)
 
     def test_unreachable_host_keeps_its_probe_finding(self):
         tls = Finding('tls-invalid', 'medium', 'old.example.com')
@@ -56,7 +69,7 @@ class Run(unittest.TestCase):
         self.assertIn(tls.id, self.state_out.read_text())
 
     def test_audit_failure_keeps_state_and_sends_nothing(self):
-        def broken(opened, resolved, previous_text):
+        def broken(opened, resolved, generation):
             raise ProviderError('/v1/audit: HTTPError')
         self.state_in.write_text(dump_state([A]))
         code = run(self.state_in, self.state_out, lambda: ([A, B], set()), self.sent.append, out=self.out,
@@ -69,8 +82,8 @@ class Run(unittest.TestCase):
         seen = []
         self.state_in.write_text(dump_state([A]))
         run(self.state_in, self.state_out, lambda: ([A, B], set()), self.sent.append, out=self.out,
-            audit=lambda o, r, p: seen.append(([f.id for f in o], r)))
-        self.assertEqual(seen, [([B.id], [])])
+            audit=lambda o, r, g: seen.append(([f.id for f in o], r, g)))
+        self.assertEqual(seen, [([B.id], [], 0)])
 
     def test_public_output_has_no_hostname(self):  # AC6
         self.go(lambda: ([A, B], set()))
@@ -79,3 +92,18 @@ class Run(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RequireAudit(unittest.TestCase):
+    def test_missing_audit_key_fails_before_any_provider_call(self):
+        from unittest import mock
+
+        from posture_monitor import run as run_module
+
+        d = Path(tempfile.mkdtemp())
+        with mock.patch.dict('os.environ', {}, clear=True), \
+                mock.patch.object(run_module, 'live_findings', side_effect=AssertionError('must not run')):
+            code = run_module.main(['--require-audit', '--no-notify', '--state-in', str(d / 'a'),
+                                    '--state-out', str(d / 'b')])
+        self.assertEqual(code, PROVIDER_FAILED)
+        self.assertFalse((d / 'b').exists())

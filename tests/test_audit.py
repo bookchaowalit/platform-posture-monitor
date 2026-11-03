@@ -55,14 +55,15 @@ class Events(unittest.TestCase):
         self.assertNotEqual(t, event_target(Finding('tls-invalid', 'medium', 'y' * 80 + '.example.com').id))
 
     def test_idempotency_key_is_stable_for_a_retried_run(self):
-        self.assertEqual(idempotency_key('opened', A.id, 'state-v1'), idempotency_key('opened', A.id, 'state-v1'))
-        self.assertNotEqual(idempotency_key('opened', A.id, 'state-v1'), idempotency_key('opened', A.id, 'state-v2'))
-        self.assertLessEqual(len(idempotency_key('opened', A.id, 'x')), 128)
+        self.assertEqual(idempotency_key('opened', A.id, 3), idempotency_key('opened', A.id, 3))
+        # the same finding reopening later (a later generation) is a new event, not a duplicate
+        self.assertNotEqual(idempotency_key('opened', A.id, 3), idempotency_key('opened', A.id, 5))
+        self.assertLessEqual(len(idempotency_key('opened', A.id, 0)), 128)
 
     def test_sink_posts_one_event_per_change(self):
         calls = []
         sink = AuditSink(token=lambda: 'T', post=lambda body, key, token: calls.append((body, key, token)))
-        sink([A], [Finding('zone-caa', 'low', 'zone').as_dict()], previous_text='s')
+        sink([A], [Finding('zone-caa', 'low', 'zone').as_dict()], generation=0)
         self.assertEqual([c[0]['action'] for c in calls], ['posture.opened', 'posture.resolved'])
         self.assertEqual(calls[0][0]['target'], 'tunnel-no-access.vault.example.com')
         self.assertEqual(calls[0][2], 'T')

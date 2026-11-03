@@ -20,8 +20,11 @@ import uuid
 from .collect import ProviderError
 
 IDENTITY = 'https://identity-api-production-fad1.up.railway.app'
-SECURITY_API = 'https://security-api-production-f817.up.railway.app'
+# Through the edge gateway (platform-api-gateway SPEC-001, first consumer 2026-11-03); rollback = the direct
+# URL https://security-api-production-f817.up.railway.app. identity's token endpoint is not behind the gateway.
+SECURITY_API = 'https://gateway.bookchaowalit.com/v1/platform-security'
 CLIENT_ID = 'posture-monitor'
+USER_AGENT = 'posture-monitor/1'
 TARGET = re.compile(r'[a-z][a-z0-9_.-]{0,63}')  # security-api identifier rule
 
 
@@ -56,9 +59,10 @@ def event_target(finding_id):
 
 
 
-def idempotency_key(change, finding_id, previous_text):
-    """Same previous state and finding give the same key, so a retried run never duplicates."""
-    basis = f'{change}\n{finding_id}\n{hashlib.sha256(previous_text.encode()).hexdigest()}'
+def idempotency_key(change, finding_id, generation):
+    """Same state generation and finding give the same key, so a retried run never duplicates;
+    every written state bumps the generation, so a finding that reopens later is a new event."""
+    basis = f'{change}\n{finding_id}\n{generation}'
     return 'posture-' + hashlib.sha256(basis.encode()).hexdigest()
 
 
@@ -77,13 +81,13 @@ def service_token(private_key_pem):
         'client_assertion': assertion(CLIENT_ID, f'{IDENTITY}/v1/token', private_key_pem),
         'audience': 'security-api', 'scope': 'audit:write'}).encode()
     req = urllib.request.Request(f'{IDENTITY}/v1/token', data=form,
-                                 headers={'Content-Type': 'application/x-www-form-urlencoded'})
+                                 headers={'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT})
     return _call(req)['access_token']
 
 
 def post_event(body, key, token):
     req = urllib.request.Request(f'{SECURITY_API}/v1/audit', method='POST', data=json.dumps(body).encode(),
-                                 headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json',
+                                 headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json', 'User-Agent': USER_AGENT,
                                           'Idempotency-Key': key})
     _call(req)
 
@@ -92,11 +96,11 @@ class AuditSink:
     def __init__(self, token, post=post_event):
         self.token, self.post = token, post
 
-    def __call__(self, opened, resolved, previous_text):
+    def __call__(self, opened, resolved, generation):
         changes = [('opened', f.id) for f in opened] + [('resolved', f['id']) for f in resolved]
         if not changes:
             return
         token = self.token()
         for change, fid in changes:
             self.post({'action': f'posture.{change}', 'target': event_target(fid)},
-                      idempotency_key(change, fid, previous_text), token)
+                      idempotency_key(change, fid, generation), token)

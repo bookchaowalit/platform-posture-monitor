@@ -15,8 +15,19 @@ def load_state(text):
     return {f['id']: f for f in json.loads(text)['findings']}
 
 
-def dump_state(findings):
-    return json.dumps({'version': 1, 'findings': [f.as_dict() for f in findings]}, indent=1) + '\n'
+def load_meta(text):
+    """(generation, pending_message) of a state; a missing or v1 state is generation 0, nothing pending."""
+    if not text.strip():
+        return 0, None
+    data = json.loads(text)
+    return int(data.get('generation', 0)), data.get('pending_message')
+
+
+def dump_state(findings, generation=0, pending_message=None):
+    data = {'version': 2, 'generation': generation, 'findings': [f.as_dict() for f in findings]}
+    if pending_message:
+        data['pending_message'] = pending_message
+    return json.dumps(data, indent=1) + '\n'
 
 
 def diff(previous, current):

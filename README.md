@@ -39,11 +39,19 @@ is not a posture finding; the uptime Worker covers availability.
 - State: `state.json` in the private R2 bucket `posture-monitor`. It is replaced only after a
   complete inventory and a delivered alert, so a provider outage never "resolves" findings and
   an undelivered alert is retried next run.
-- Exit codes: `0` ok, `2` provider or R2 failure, `3` Telegram failure. Anything but `0` sends
+- Exit codes: `0` ok, `2` provider, audit or R2 failure, `3` Telegram failure. Anything but `0` sends
   `ok: false` to the uptime Worker heartbeat `posture-monitor`; no report for 13 hours alerts too.
 - Every opened or resolved finding is also an audit event in `security-api`
   (`posture.opened` / `posture.resolved`), written with a platform-identity service token
-  (client `posture-monitor`, `private_key_jwt`; RS256 signed by the `openssl` binary).
+  (client `posture-monitor`, `private_key_jwt`; RS256 signed by the `openssl` binary). Since
+  2026-11-03 these calls go through the edge gateway
+  (`https://gateway.bookchaowalit.com/v1/platform-security`, the gateway's first consumer);
+  rollback is the direct URL in `posture_monitor/audit.py`. The token comes straight from identity.
+- The hosted run passes `--require-audit`: a missing identity key fails the run instead of
+  skipping the audit. Event keys carry the state `generation` (bumped on every written state),
+  so a finding that reopens later is a new event while a retried run never duplicates one. If
+  Telegram fails after the audit, state is still written with the unsent alert as
+  `pending_message`, sent first on the next run (exit 3 still alerts through the heartbeat).
 - Standard library only: no third-party runtime dependency.
 
 ## Credentials

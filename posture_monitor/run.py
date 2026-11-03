@@ -10,7 +10,7 @@ from pathlib import Path
 from .audit import AuditSink, service_token
 from .checks import PROBE_RULES, Finding, evaluate
 from .collect import Cloudflare, ProviderError, dangling_cnames, probe_all, web_hosts
-from .report import diff, dump_state, load_state, message, public_summary
+from .report import diff, dump_state, load_meta, load_state, message, public_summary
 
 OK, PROVIDER_FAILED, NOTIFY_FAILED = 0, 2, 3
 
@@ -45,8 +45,9 @@ def telegram(env):
 
 
 def run(state_in, state_out, findings_fn, send, out=sys.stdout, audit=None):
-    """Returns the exit code. State is written only after a complete inventory, recorded audit
-    events and a sent alert, so a failed step is retried whole next run."""
+    """Returns the exit code. A provider or audit failure writes no state, so the run is retried
+    whole. Once the audit holds the transitions, state is written even if Telegram fails, with
+    the unsent text kept as `pending_message` and sent first next run."""
     try:
         current, unknown = findings_fn()
     except ProviderError as exc:
@@ -55,22 +56,25 @@ def run(state_in, state_out, findings_fn, send, out=sys.stdout, audit=None):
         return PROVIDER_FAILED
     previous_text = state_in.read_text() if state_in.exists() else ''
     previous = load_state(previous_text)
+    generation, pending = load_meta(previous_text)
     current = carry_forward(previous or {}, current, unknown)
     opened, resolved = diff(previous or {}, current)
     if audit:
         try:
-            audit(opened, resolved, previous_text)  # idempotent per previous state, safe to retry
+            audit(opened, resolved, generation)  # idempotent per state generation, safe to retry
         except ProviderError as exc:
             print(json.dumps({'status': 'audit_failed', 'error': str(exc)}), file=out)
             return PROVIDER_FAILED
     text = message(opened, resolved, current, first_run=previous is None)
+    text = '\n\n'.join(t for t in (pending, text) if t) or None
     if text:
         try:
             send(text)
-        except Exception as exc:  # noqa: BLE001  keep old state so the alert is retried next run
+        except Exception as exc:  # noqa: BLE001  the alert is kept in state and retried next run
+            state_out.write_text(dump_state(current, generation + 1, pending_message=text))
             print(json.dumps({'status': 'notify_failed', 'error': type(exc).__name__}), file=out)
             return NOTIFY_FAILED
-    state_out.write_text(dump_state(current))
+    state_out.write_text(dump_state(current, generation + 1))
     print(public_summary(current, len(opened), len(resolved)), file=out)
     return OK
 
@@ -80,9 +84,14 @@ def main(argv=None):
     p.add_argument('--state-in', type=Path, required=True)
     p.add_argument('--state-out', type=Path, required=True)
     p.add_argument('--no-notify', action='store_true', help='print the alert to stderr instead of Telegram')
+    p.add_argument('--require-audit', action='store_true',
+                   help='fail (exit 2) when POSTURE_IDENTITY_PRIVATE_KEY_PEM is missing instead of skipping the audit')
     args = p.parse_args(argv)
     env = os.environ
     send = (lambda text: print(text, file=sys.stderr)) if args.no_notify else telegram(env)
     key = env.get('POSTURE_IDENTITY_PRIVATE_KEY_PEM')
+    if args.require_audit and not key:
+        print(json.dumps({'status': 'audit_failed', 'error': 'missing POSTURE_IDENTITY_PRIVATE_KEY_PEM'}))
+        return PROVIDER_FAILED
     audit = AuditSink(lambda: service_token(key)) if key else None
     return run(args.state_in, args.state_out, lambda: live_findings(env), send, audit=audit)
