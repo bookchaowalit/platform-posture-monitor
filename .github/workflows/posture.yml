@@ -45,6 +45,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          POSTURE_IDENTITY_PRIVATE_KEY_PEM: ${{ secrets.POSTURE_IDENTITY_PRIVATE_KEY_PEM }}
         run: |
           set +e
           python -m posture_monitor.r2 get state.json "$RUNNER_TEMP/previous.json" 2> "$RUNNER_TEMP/stderr.log"

@@ -55,6 +55,23 @@ class Run(unittest.TestCase):
         self.assertEqual(self.sent, [])  # nothing resolved
         self.assertIn(tls.id, self.state_out.read_text())
 
+    def test_audit_failure_keeps_state_and_sends_nothing(self):
+        def broken(opened, resolved, previous_text):
+            raise ProviderError('/v1/audit: HTTPError')
+        self.state_in.write_text(dump_state([A]))
+        code = run(self.state_in, self.state_out, lambda: ([A, B], set()), self.sent.append, out=self.out,
+                   audit=broken)
+        self.assertEqual(code, PROVIDER_FAILED)
+        self.assertEqual(self.sent, [])
+        self.assertFalse(self.state_out.exists())
+
+    def test_audit_gets_the_changes(self):
+        seen = []
+        self.state_in.write_text(dump_state([A]))
+        run(self.state_in, self.state_out, lambda: ([A, B], set()), self.sent.append, out=self.out,
+            audit=lambda o, r, p: seen.append(([f.id for f in o], r)))
+        self.assertEqual(seen, [([B.id], [])])
+
     def test_public_output_has_no_hostname(self):  # AC6
         self.go(lambda: ([A, B], set()))
         self.assertNotIn('example.com', self.out.getvalue())

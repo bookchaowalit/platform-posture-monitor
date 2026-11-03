@@ -41,6 +41,9 @@ is not a posture finding; the uptime Worker covers availability.
   an undelivered alert is retried next run.
 - Exit codes: `0` ok, `2` provider or R2 failure, `3` Telegram failure. Anything but `0` sends
   `ok: false` to the uptime Worker heartbeat `posture-monitor`; no report for 13 hours alerts too.
+- Every opened or resolved finding is also an audit event in `security-api`
+  (`posture.opened` / `posture.resolved`), written with a platform-identity service token
+  (client `posture-monitor`, `private_key_jwt`; RS256 signed by the `openssl` binary).
 - Standard library only: no third-party runtime dependency.
 
 ## Credentials
@@ -54,6 +57,7 @@ All in Infisical `/posture-monitor` and mirrored to this repository's Actions se
 | `POSTURE_R2_ACCESS_KEY_ID`, `POSTURE_R2_SECRET_ACCESS_KEY`, `POSTURE_R2_ENDPOINT` | S3 credentials derived from the same token (id, SHA-256 of the value) |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | infra bot (Infisical `/telegram`) |
 | `HEARTBEAT_TOKEN` | uptime Worker heartbeat (Infisical `/monitoring`) |
+| `POSTURE_IDENTITY_PRIVATE_KEY_PEM` | RSA key of identity service client `posture-monitor`; identity holds only the public half in `IDENTITY_SERVICE_CLIENTS_JSON` (audience `security-api`, scopes `audit:read`, `audit:write`) |
 
 Rotation: create a new token with the same policies, update Infisical and the Actions
 secrets, run the workflow once, then delete the old token.
@@ -70,5 +74,4 @@ infisical run --path /posture-monitor -- python3 -m posture_monitor \
 
 ## Not covered yet
 
-Neon IP allowlists, response security headers and writing findings to `security-api`; see
-"Later" in SPEC-001.
+Neon IP allowlists and response security headers; see "Later" in SPEC-001.

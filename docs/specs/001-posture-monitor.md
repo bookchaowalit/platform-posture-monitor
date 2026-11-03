@@ -44,9 +44,16 @@ finding opens or resolves. A missed run alerts through the uptime Worker heartbe
 
 Out of scope for v1: Neon IP allowlists (the only Neon credential is account-wide with
 write rights, too broad for a public-repo job; NET-05 is an owner decision), response
-security headers (NET-07, provider-wide), Railway/Vercel project settings, and writing to
-`security-api` (needs platform-identity `client_credentials`, merged but not deployed;
-see "Later").
+security headers (NET-07, provider-wide) and Railway/Vercel project settings.
+
+**Audit trail (added 2026-11-03).** Each opened or resolved finding is appended to
+`security-api` `POST /v1/audit` (`action=posture.opened|posture.resolved`,
+`target=<rule>.<subject>` or `<rule>.h<hash>` when the subject does not fit the identifier
+rule). The monitor is platform-identity service client `posture-monitor`
+(`client_credentials` + `private_key_jwt`, audience `security-api`, scope `audit:write`,
+system workspace). Events are written before the Telegram message and before state, with an
+`Idempotency-Key` derived from the change, the finding id and the previous state, so a
+retried run never duplicates an event. An audit failure exits 2 and keeps the old state.
 
 ## Requirements
 
@@ -80,8 +87,5 @@ see "Later").
 
 ## Later
 
-- Send each opened/resolved finding to `security-api` `POST /v1/audit`
-  (`action=posture.opened|posture.resolved`, `target=<finding id hash>`) once identity-api
-  issues `client_credentials` tokens with audience `security-api`.
 - Neon allowlist rule with a read-only credential.
 - Registry drift: hostnames in DNS with no system in `online-systems.yaml`.

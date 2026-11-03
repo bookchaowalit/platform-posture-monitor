@@ -7,6 +7,7 @@ import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .audit import AuditSink, service_token
 from .checks import PROBE_RULES, Finding, evaluate
 from .collect import Cloudflare, ProviderError, dangling_cnames, probe_all, web_hosts
 from .report import diff, dump_state, load_state, message, public_summary
@@ -43,8 +44,9 @@ def telegram(env):
     return send
 
 
-def run(state_in, state_out, findings_fn, send, out=sys.stdout):
-    """Returns the exit code. State is written only after a complete inventory and a sent alert."""
+def run(state_in, state_out, findings_fn, send, out=sys.stdout, audit=None):
+    """Returns the exit code. State is written only after a complete inventory, recorded audit
+    events and a sent alert, so a failed step is retried whole next run."""
     try:
         current, unknown = findings_fn()
     except ProviderError as exc:
@@ -55,6 +57,12 @@ def run(state_in, state_out, findings_fn, send, out=sys.stdout):
     previous = load_state(previous_text)
     current = carry_forward(previous or {}, current, unknown)
     opened, resolved = diff(previous or {}, current)
+    if audit:
+        try:
+            audit(opened, resolved, previous_text)  # idempotent per previous state, safe to retry
+        except ProviderError as exc:
+            print(json.dumps({'status': 'audit_failed', 'error': str(exc)}), file=out)
+            return PROVIDER_FAILED
     text = message(opened, resolved, current, first_run=previous is None)
     if text:
         try:
@@ -75,4 +83,6 @@ def main(argv=None):
     args = p.parse_args(argv)
     env = os.environ
     send = (lambda text: print(text, file=sys.stderr)) if args.no_notify else telegram(env)
-    return run(args.state_in, args.state_out, lambda: live_findings(env), send)
+    key = env.get('POSTURE_IDENTITY_PRIVATE_KEY_PEM')
+    audit = AuditSink(lambda: service_token(key)) if key else None
+    return run(args.state_in, args.state_out, lambda: live_findings(env), send, audit=audit)
