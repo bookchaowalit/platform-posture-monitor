@@ -1,0 +1,73 @@
+# Security posture monitor (docs/specs/001-posture-monitor.md): every 6 h, rebuild the edge
+# inventory from Cloudflare plus one HTTPS GET per web hostname, diff it with the previous run
+# and send a Telegram message only when a finding opens or resolves.
+#
+# Public repository: GitHub-hosted runner, and the log is public, so the job prints only counts
+# per severity and an error type. Findings themselves go only to Telegram; state lives in the
+# private R2 bucket posture-monitor. A failed or missed run alerts through the uptime Worker
+# heartbeat `posture-monitor` (13 h).
+name: Posture monitor
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: posture-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      POSTURE_R2_ENDPOINT: ${{ secrets.POSTURE_R2_ENDPOINT }}
+      POSTURE_R2_ACCESS_KEY_ID: ${{ secrets.POSTURE_R2_ACCESS_KEY_ID }}
+      POSTURE_R2_SECRET_ACCESS_KEY: ${{ secrets.POSTURE_R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Check posture
+        id: run
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set +e
+          python -m posture_monitor.r2 get state.json "$RUNNER_TEMP/previous.json" 2> "$RUNNER_TEMP/stderr.log"
+          code=$?
+          if [ "$code" -eq 0 ]; then
+            # stdout is the counts-only summary; stderr stays in a runner temp file, out of the public log.
+            python -m posture_monitor --state-in "$RUNNER_TEMP/previous.json" --state-out "$RUNNER_TEMP/current.json" \
+              2>> "$RUNNER_TEMP/stderr.log" | tee -a "$GITHUB_STEP_SUMMARY"
+            code=${PIPESTATUS[0]}
+          fi
+          if [ "$code" -eq 0 ]; then
+            python -m posture_monitor.r2 put state.json "$RUNNER_TEMP/current.json" 2>> "$RUNNER_TEMP/stderr.log"
+            code=$?
+          fi
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Heartbeat
+        if: ${{ always() }}
+        env:
+          HEARTBEAT_TOKEN: ${{ secrets.HEARTBEAT_TOKEN }}
+          CODE: ${{ steps.run.outputs.exit_code }}
+        run: |
+          if [ "$CODE" = 0 ]; then body='{"ok":true,"failed":[]}'; else body='{"ok":false,"failed":["posture-monitor"]}'; fi
+          curl -fsS -X POST https://solo-empire-monitor.bookchaowalit.workers.dev/heartbeat/posture-monitor \
+            -H "Authorization: Bearer $HEARTBEAT_TOKEN" -H "Content-Type: application/json" -d "$body"
