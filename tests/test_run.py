@@ -117,6 +117,22 @@ class Run(unittest.TestCase):
             audit=lambda events: seen.extend(events) or [])
         self.assertEqual(seen, [{'change': 'opened', 'id': B.id, 'generation': 2}])
 
+    def test_events_wait_for_a_sink_when_none_is_configured(self):
+        self.state_in.write_text(dump_state([A], generation=4))
+        self.assertEqual(self.go(lambda: ([A, B], set())), OK)  # no sink is not a failure
+        held = json.loads(self.state_out.read_text())['pending_audit']
+        self.assertEqual(held, [{'change': 'opened', 'id': B.id, 'generation': 4}])
+        self.state_in.write_text(self.state_out.read_text())
+        seen = []
+        run(self.state_in, self.state_out, lambda: ([A, B], set()), self.sent.append, out=self.out,
+            audit=lambda events: seen.extend(events) or [])
+        self.assertEqual(seen, held)
+
+    def test_pending_audit_is_bounded(self):
+        events = [{'change': 'opened', 'id': f'x{i}', 'generation': i} for i in range(600)]
+        kept = json.loads(dump_state([A], pending_audit=events))['pending_audit']
+        self.assertEqual((len(kept), kept[0]['id'], kept[-1]['id']), (500, 'x100', 'x599'))
+
     def test_public_output_has_no_hostname(self):  # AC6
         self.go(lambda: ([A, B], set()))
         self.assertNotIn('example.com', self.out.getvalue())

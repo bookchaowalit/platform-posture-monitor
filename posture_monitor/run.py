@@ -67,6 +67,7 @@ def run(state_in, state_out, findings_fn, send, out=sys.stdout, audit=None):
     events = pending_audit + [{'change': 'opened', 'id': f.id, 'generation': generation} for f in opened] + \
         [{'change': 'resolved', 'id': f['id'], 'generation': generation} for f in resolved]
     unposted = audit(events) if audit else []
+    held = [] if audit else events  # no sink this run (local, --no-audit): keep them for a run that has one
 
     queue = list(pending_messages)
     text = message(opened, resolved, current, first_run=previous is None)
@@ -80,10 +81,12 @@ def run(state_in, state_out, findings_fn, send, out=sys.stdout, audit=None):
             unsent = queue[n:]
             break
 
-    state_out.write_text(dump_state(current, generation + 1, pending_messages=unsent, pending_audit=unposted))
+    state_out.write_text(dump_state(current, generation + 1, pending_messages=unsent, pending_audit=unposted or held))
     summary = json.loads(public_summary(current, len(opened), len(resolved)))
     if unposted:
         summary['status'], summary['audit_pending'] = 'audit_failed', len(unposted)
+    elif held:
+        summary['audit_pending'] = len(held)
     if unsent:
         summary['status'], summary['alerts_pending'] = summary.get('status', 'notify_failed'), len(unsent)
     print(json.dumps(summary), file=out)

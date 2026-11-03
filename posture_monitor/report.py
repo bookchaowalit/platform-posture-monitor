@@ -16,6 +16,7 @@ def load_state(text):
 
 
 MAX_PENDING = 5  # unsent alerts kept for the next run; older ones collapse into a note
+MAX_PENDING_AUDIT = 500  # audit events kept for the next run; the oldest go first
 
 
 def load_meta(text):
@@ -48,7 +49,7 @@ def dump_state(findings, generation=0, pending_messages=(), pending_audit=()):
     if pending_messages:
         data['pending_messages'] = cap_pending(list(pending_messages))
     if pending_audit:
-        data['pending_audit'] = list(pending_audit)
+        data['pending_audit'] = list(pending_audit)[-MAX_PENDING_AUDIT:]
     return json.dumps(data, indent=1) + '\n'
 
 
