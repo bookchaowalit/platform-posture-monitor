@@ -12,7 +12,7 @@ from .checks import Probe, ZoneSettings
 
 API = 'https://api.cloudflare.com/client/v4'
 DOH = 'https://cloudflare-dns.com/dns-query'
-NXDOMAIN = 3
+NOERROR, NXDOMAIN = 0, 3
 WEB_TARGETS = ('.vercel-dns.com', '.vercel-dns-017.com', '.up.railway.app', '.cfargotunnel.com',
                '.workers.dev', '.pages.dev')
 TIMEOUT = 10
@@ -63,14 +63,36 @@ class Cloudflare:
             always_use_https=setting('always_use_https'), hsts_enabled=bool(hsts.get('enabled')),
             dnssec_status=self.get(f'/zones/{zid}/dnssec')['result']['status'],
             has_caa=any(r['type'] == 'CAA' and r['name'] == self.zone_name for r in records))
-        access = [a['domain'] for a in self.paged(f'/accounts/{self.account}/access/apps')
-                  if a.get('domain')]
+        access = enforcing_domains(self.paged(f'/accounts/{self.account}/access/apps'))
         workers_dev = []
         for script in self.get(f'/accounts/{self.account}/workers/scripts')['result']:
             sub = self.get(f'/accounts/{self.account}/workers/scripts/{script["id"]}/subdomain')['result']
             if sub.get('enabled'):
                 workers_dev.append(script['id'])
         return records, access, zone_settings, sorted(workers_dev)
+
+
+def _everyone(policy):
+    return any('everyone' in rule for rule in policy.get('include', []))
+
+
+def enforcing_domains(apps):
+    """Domains of self-hosted Access apps that actually require a login.
+
+    An app counts only if it has an allow rule limited to someone (not `everyone`) and no bypass
+    rule that lets everyone through; anything else would hide an open host behind an app.
+    """
+    domains = []
+    for app in apps:
+        if app.get('type') != 'self_hosted':
+            continue
+        policies = app.get('policies', [])
+        if any(p.get('decision') == 'bypass' and _everyone(p) for p in policies):
+            continue
+        if not any(p.get('decision') == 'allow' and p.get('include') and not _everyone(p) for p in policies):
+            continue
+        domains += [d for d in {app.get('domain'), *app.get('self_hosted_domains', [])} if d]
+    return sorted(domains)
 
 
 def web_hosts(records):
@@ -102,12 +124,15 @@ def target_exists(name):
             status = json.load(resp)['Status']
     except Exception as exc:  # noqa: BLE001
         raise ProviderError(f'dns-query: {type(exc).__name__}') from None
-    return status != NXDOMAIN
+    if status not in (NOERROR, NXDOMAIN):
+        # SERVFAIL, REFUSED…: no verdict, so the run must fail rather than call the target healthy.
+        raise ProviderError(f'dns-query: status {status}')
+    return status == NOERROR
 
 
 def dangling_cnames(records, exists=target_exists):
     """CNAME names whose target is NXDOMAIN (proxied ones included: Cloudflare hides the target)."""
-    cnames = [r for r in records if r['type'] == 'CNAME' and not r['name'].startswith('*')]
+    cnames = [r for r in records if r['type'] == 'CNAME']  # wildcards too: the target is what can dangle
     with ThreadPoolExecutor(WORKERS) as pool:
         alive = list(pool.map(lambda r: exists(r['content']), cnames))
     return sorted(r['name'] for r, ok in zip(cnames, alive) if not ok)

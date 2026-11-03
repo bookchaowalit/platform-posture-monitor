@@ -35,8 +35,12 @@ class TunnelAccess(unittest.TestCase):  # AC1
     def test_exact_app_covers(self):
         self.assertEqual(self.run_with(['vault.example.com']), [])
 
-    def test_app_with_path_covers_host(self):
-        self.assertEqual(self.run_with(['vault.example.com/admin']), [])
+    def test_path_scoped_app_does_not_cover_host(self):
+        self.assertEqual(len(self.run_with(['vault.example.com/admin'])), 1)
+
+    def test_whole_host_paths_cover(self):
+        self.assertEqual(self.run_with(['vault.example.com/']), [])
+        self.assertEqual(self.run_with(['vault.example.com/*']), [])
 
     def test_wildcard_app_covers(self):
         self.assertEqual(self.run_with(['*.example.com']), [])

@@ -41,8 +41,11 @@ class Probe(NamedTuple):
 
 
 def access_covers(host, access_domains):
+    """True when an app protects the whole host: a path-scoped app (`host/admin`) leaves the rest open."""
     for domain in access_domains:
-        app_host = domain.split('/', 1)[0].lower()
+        app_host, _, path = domain.lower().partition('/')
+        if path not in ('', '*'):
+            continue
         if app_host == host or (app_host.startswith('*.') and host.endswith(app_host[1:])):
             return True
     return False

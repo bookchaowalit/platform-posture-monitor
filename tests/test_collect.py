@@ -2,7 +2,9 @@ import io
 import json
 import unittest
 
-from posture_monitor.collect import Cloudflare, ProviderError, dangling_cnames, web_hosts
+from unittest import mock
+
+from posture_monitor.collect import Cloudflare, ProviderError, dangling_cnames, enforcing_domains, target_exists, web_hosts
 
 
 def rec(name, content, rtype='CNAME', proxied=False):
@@ -19,8 +21,46 @@ class Selection(unittest.TestCase):
 
     def test_dangling_checks_every_cname_target(self):
         records = [rec('a.x.com', 'gone.up.railway.app'), rec('b.x.com', 'ok.vercel-dns.com', proxied=True),
-                   rec('x.com', '1.2.3.4', 'A')]
-        self.assertEqual(dangling_cnames(records, exists=lambda t: t != 'gone.up.railway.app'), ['a.x.com'])
+                   rec('*.x.com', 'gone.vercel-dns.com'), rec('x.com', '1.2.3.4', 'A')]
+        gone = {'gone.up.railway.app', 'gone.vercel-dns.com'}
+        self.assertEqual(dangling_cnames(records, exists=lambda t: t not in gone), ['*.x.com', 'a.x.com'])
+
+
+class AccessApps(unittest.TestCase):
+    OWNER = {'decision': 'allow', 'include': [{'email': {'email': 'owner@example.com'}}]}
+
+    def app(self, policies, type_='self_hosted', **kw):
+        return {'type': type_, 'domain': 'vault.x.com', 'policies': policies, **kw}
+
+    def test_owner_only_app_enforces(self):
+        self.assertEqual(enforcing_domains([self.app([self.OWNER])]), ['vault.x.com'])
+
+    def test_self_hosted_domains_count(self):
+        app = self.app([self.OWNER], self_hosted_domains=['vault.x.com', 'home.x.com'])
+        self.assertEqual(enforcing_domains([app]), ['home.x.com', 'vault.x.com'])
+
+    def test_open_apps_do_not_count(self):
+        everyone = {'decision': 'allow', 'include': [{'everyone': {}}]}
+        bypass = {'decision': 'bypass', 'include': [{'everyone': {}}]}
+        self.assertEqual(enforcing_domains([self.app([everyone])]), [])
+        self.assertEqual(enforcing_domains([self.app([self.OWNER, bypass])]), [])
+        self.assertEqual(enforcing_domains([self.app([])]), [])
+        self.assertEqual(enforcing_domains([self.app([self.OWNER], type_='warp')]), [])
+
+
+class Doh(unittest.TestCase):
+    def status(self, code):
+        body = FakeResp(json.dumps({'Status': code}).encode())
+        with mock.patch('urllib.request.urlopen', return_value=body):
+            return target_exists('t.example.com')
+
+    def test_noerror_exists_nxdomain_does_not(self):
+        self.assertTrue(self.status(0))
+        self.assertFalse(self.status(3))
+
+    def test_other_status_fails_the_run(self):
+        with self.assertRaises(ProviderError):
+            self.status(2)  # SERVFAIL
 
 
 class FakeResp(io.BytesIO):
