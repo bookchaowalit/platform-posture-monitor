@@ -1,10 +1,16 @@
 import io
 import json
 import unittest
-
 from unittest import mock
 
-from posture_monitor.collect import Cloudflare, ProviderError, dangling_cnames, enforcing_domains, target_exists, web_hosts
+from posture_monitor.collect import (
+    Cloudflare,
+    ProviderError,
+    dangling_cnames,
+    enforcing_domains,
+    target_exists,
+    web_hosts,
+)
 
 
 def rec(name, content, rtype='CNAME', proxied=False):

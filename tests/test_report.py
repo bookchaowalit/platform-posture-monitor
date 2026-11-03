@@ -2,7 +2,7 @@ import json
 import unittest
 
 from posture_monitor.checks import Finding
-from posture_monitor.report import diff, message, public_summary, load_state, dump_state
+from posture_monitor.report import diff, dump_state, load_state, message, public_summary
 
 A = Finding('tunnel-no-access', 'high', 'vault.example.com')
 B = Finding('zone-caa', 'low', 'zone')

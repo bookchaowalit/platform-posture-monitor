@@ -127,7 +127,7 @@ def dangling_cnames(records, exists=target_exists):
     cnames = [r for r in records if r['type'] == 'CNAME']  # wildcards too: the target is what can dangle
     with ThreadPoolExecutor(WORKERS) as pool:
         alive = list(pool.map(lambda r: exists(r['content']), cnames))
-    return sorted(r['name'] for r, ok in zip(cnames, alive) if not ok)
+    return sorted(r['name'] for r, ok in zip(cnames, alive, strict=True) if not ok)
 
 
 def probe(host):
@@ -159,4 +159,4 @@ def probe(host):
 
 def probe_all(hosts, prober=probe):
     with ThreadPoolExecutor(WORKERS) as pool:
-        return dict(zip(hosts, pool.map(prober, hosts)))
+        return dict(zip(hosts, pool.map(prober, hosts), strict=True))

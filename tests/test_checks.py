@@ -1,7 +1,7 @@
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from posture_monitor.checks import Probe, evaluate, ZoneSettings
+from posture_monitor.checks import Probe, ZoneSettings, evaluate
 
 NOW = datetime(2026, 11, 3, tzinfo=UTC)
 GOOD_ZONE = ZoneSettings(ssl='strict', min_tls_version='1.2', always_use_https='on', hsts_enabled=True,
