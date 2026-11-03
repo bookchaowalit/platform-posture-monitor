@@ -36,9 +36,8 @@ is not a posture finding; the uptime Worker covers availability.
 
 - `.github/workflows/posture.yml`, cron `23 */6 * * *` and manual dispatch, GitHub-hosted
   runner (public repository). The log prints only counts per severity.
-- State: `state.json` in the private R2 bucket `posture-monitor`. It is replaced only after a
-  complete inventory and a delivered alert, so a provider outage never "resolves" findings and
-  an undelivered alert is retried next run.
+- State: `state.json` in the private R2 bucket `posture-monitor`. A failed inventory never
+  replaces it, so a provider outage never "resolves" findings.
 - Exit codes: `0` ok, `2` provider, audit or R2 failure, `3` Telegram failure. Anything but `0` sends
   `ok: false` to the uptime Worker heartbeat `posture-monitor`; no report for 13 hours alerts too.
 - Every opened or resolved finding is also an audit event in `security-api`
@@ -49,9 +48,12 @@ is not a posture finding; the uptime Worker covers availability.
   rollback is the direct URL in `posture_monitor/audit.py`. The token comes straight from identity.
 - The hosted run passes `--require-audit`: a missing identity key fails the run instead of
   skipping the audit. Event keys carry the state `generation` (bumped on every written state),
-  so a finding that reopens later is a new event while a retried run never duplicates one. If
-  Telegram fails after the audit, state is still written with the unsent alert as
-  `pending_message`, sent first on the next run (exit 3 still alerts through the heartbeat).
+  so a finding that reopens later is a new event while a retried run never duplicates one.
+- After every complete inventory the state is written, even when a later step failed: audit events
+  that were not posted stay in `pending_audit` (with the generation they were first seen in) and
+  alerts that were not sent in `pending_messages` (separate messages, each under Telegram's limit,
+  at most 5). Both are retried first on the next run; the exit code (2 audit, 3 Telegram) still
+  alerts through the heartbeat. Only a failed inventory writes no state.
 - Standard library only: no third-party runtime dependency.
 
 ## Credentials
