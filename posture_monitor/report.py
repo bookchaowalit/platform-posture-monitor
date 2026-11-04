@@ -32,7 +32,11 @@ def load_meta(text):
 
 
 def load_epoch(text):
-    """The state lineage id: a fresh random one for a new state, '' for one written before epochs."""
+    """The state lineage id: a fresh random one for a new state, '' for one written before epochs.
+
+    If the very first state write fails after its audit events were posted, the next run starts
+    another lineage and posts them again: a duplicate, never a lost event (at-least-once on purpose).
+    """
     if not text.strip():
         return secrets.token_hex(8)
     return str(json.loads(text).get('epoch', ''))

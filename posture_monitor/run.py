@@ -10,7 +10,7 @@ from pathlib import Path
 from .audit import AuditSink, service_token
 from .checks import PROBE_RULES, Finding, evaluate
 from .collect import Cloudflare, ProviderError, dangling_cnames, probe_all, web_hosts
-from .report import diff, dump_state, load_meta, load_state, message, public_summary, load_epoch
+from .report import diff, dump_state, load_epoch, load_meta, load_state, message, public_summary
 
 OK, PROVIDER_FAILED, NOTIFY_FAILED = 0, 2, 3
 
