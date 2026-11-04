@@ -17,7 +17,7 @@ flowchart TB
     R2["R2 bucket posture-monitor"]
     DOH["cloudflare-dns.com"]
     GWD["gateway.bookchaowalit.com, proxied"]
-    UPW["solo-empire-monitor.bookchaowalit.workers.dev"]
+    UPW["monitor.bookchaowalit.com"]
   end
   subgraph RW["Railway"]
     IDA["identity-api-production-fad1.up.railway.app"]

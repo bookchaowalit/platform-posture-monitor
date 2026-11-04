@@ -72,5 +72,5 @@ jobs:
           CODE: ${{ steps.run.outputs.exit_code }}
         run: |
           if [ "$CODE" = 0 ]; then body='{"ok":true,"failed":[]}'; else body='{"ok":false,"failed":["posture-monitor"]}'; fi
-          curl -fsS -X POST https://solo-empire-monitor.bookchaowalit.workers.dev/heartbeat/posture-monitor \
+          curl -fsS -X POST https://monitor.bookchaowalit.com/heartbeat/posture-monitor \
             -H "Authorization: Bearer $HEARTBEAT_TOKEN" -H "Content-Type: application/json" -d "$body"

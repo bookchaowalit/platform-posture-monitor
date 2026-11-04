@@ -12,7 +12,7 @@ flowchart LR
   PM -->|"POST JSON + Idempotency-Key"| GW["gateway.bookchaowalit.com/v1/platform-security/v1/audit"]
   PM -->|"POST sendMessage"| TG["api.telegram.org"]
   R2C["posture_monitor.r2"] -->|"GET / PUT SigV4 region auto"| R2["POSTURE_R2_ENDPOINT/posture-monitor/state.json"]
-  WF["posture.yml"] -->|"curl POST Bearer"| UP["solo-empire-monitor workers.dev /heartbeat/posture-monitor"]
+  WF["posture.yml"] -->|"curl POST Bearer"| UP["monitor.bookchaowalit.com /heartbeat/posture-monitor"]
 ```
 
 | Integration | Method / path | Auth | Timeout | Failure handling | Source |
