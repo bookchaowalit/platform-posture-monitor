@@ -54,6 +54,11 @@ class Events(unittest.TestCase):
         self.assertRegex(t, r'^[a-z][a-z0-9_.-]{0,63}$')
         self.assertNotEqual(t, event_target(Finding('tls-invalid', 'medium', 'y' * 80 + '.example.com').id))
 
+    def test_a_rebuilt_state_lineage_never_reuses_keys(self):
+        self.assertNotEqual(idempotency_key('opened', A.id, 0, 'e1'), idempotency_key('opened', A.id, 0, 'e2'))
+        self.assertNotEqual(idempotency_key('opened', A.id, 0, 'e1'), idempotency_key('opened', A.id, 0))
+        self.assertEqual(idempotency_key('opened', A.id, 0, ''), idempotency_key('opened', A.id, 0))
+
     def test_idempotency_key_is_stable_for_a_retried_run(self):
         self.assertEqual(idempotency_key('opened', A.id, 3), idempotency_key('opened', A.id, 3))
         # the same finding reopening later (a later generation) is a new event, not a duplicate

@@ -1,5 +1,6 @@
 """State diff, the Telegram message and the counts-only public summary (SPEC-001 R2, R3)."""
 import json
+import secrets
 
 from .checks import SEVERITY_ORDER
 
@@ -30,6 +31,13 @@ def load_meta(text):
     return int(data.get('generation', 0)), [bound(m) for m in pending], list(data.get('pending_audit', []))
 
 
+def load_epoch(text):
+    """The state lineage id: a fresh random one for a new state, '' for one written before epochs."""
+    if not text.strip():
+        return secrets.token_hex(8)
+    return str(json.loads(text).get('epoch', ''))
+
+
 def bound(text):
     """One Telegram message: never over MAX_CHARS, so a long alert can never block the queue."""
     return text if len(text) <= MAX_CHARS else text[:MAX_CHARS - 12] + '\n… (cut)'
@@ -44,8 +52,10 @@ def cap_pending(messages):
         messages[-(MAX_PENDING - 1):]
 
 
-def dump_state(findings, generation=0, pending_messages=(), pending_audit=()):
+def dump_state(findings, generation=0, pending_messages=(), pending_audit=(), epoch=''):
     data = {'version': 3, 'generation': generation, 'findings': [f.as_dict() for f in findings]}
+    if epoch:
+        data['epoch'] = epoch
     if pending_messages:
         data['pending_messages'] = cap_pending(list(pending_messages))
     if pending_audit:

@@ -59,10 +59,12 @@ def event_target(finding_id):
 
 
 
-def idempotency_key(change, finding_id, generation):
+def idempotency_key(change, finding_id, generation, epoch=''):
     """Same state generation and finding give the same key, so a retried run never duplicates;
-    every written state bumps the generation, so a finding that reopens later is a new event."""
-    basis = f'{change}\n{finding_id}\n{generation}'
+    every written state bumps the generation, so a finding that reopens later is a new event.
+    The epoch names one state lineage: a state rebuilt after loss restarts at generation 0 with a
+    new epoch, so its keys never collide with the lost lineage's (states before epochs use '')."""
+    basis = f'{change}\n{finding_id}\n{generation}' + (f'\n{epoch}' if epoch else '')
     return 'posture-' + hashlib.sha256(basis.encode()).hexdigest()
 
 
@@ -112,7 +114,7 @@ class AuditSink:
         for n, event in enumerate(events):
             try:
                 self.post({'action': f'posture.{event["change"]}', 'target': event_target(event['id'])},
-                          idempotency_key(event['change'], event['id'], event['generation']), token)
+                          idempotency_key(event['change'], event['id'], event['generation'], event.get('epoch', '')), token)
             except ProviderError:
                 return list(events[n:])
         return []

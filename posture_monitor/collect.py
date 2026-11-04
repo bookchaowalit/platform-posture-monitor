@@ -38,6 +38,16 @@ class Cloudflare:
             raise ProviderError(f'{path.split("?")[0]}: unsuccessful')
         return body
 
+    def full_policies(self, apps):
+        """Apps whose policies are only references (reusable policies, no include) get the full list,
+        so a protected app is never judged on a summary."""
+        out = []
+        for app in apps:
+            if app.get('id') and any('include' not in p for p in app.get('policies', [])):
+                app = {**app, 'policies': self.paged(f"/accounts/{self.account}/access/apps/{app['id']}/policies")}
+            out.append(app)
+        return out
+
     def paged(self, path):
         page, out = 1, []
         while True:
@@ -63,7 +73,7 @@ class Cloudflare:
             always_use_https=setting('always_use_https'), hsts_enabled=bool(hsts.get('enabled')),
             dnssec_status=self.get(f'/zones/{zid}/dnssec')['result']['status'],
             has_caa=any(r['type'] == 'CAA' and r['name'] == self.zone_name for r in records))
-        access = enforcing_domains(self.paged(f'/accounts/{self.account}/access/apps'))
+        access = enforcing_domains(self.full_policies(self.paged(f'/accounts/{self.account}/access/apps')))
         workers_dev = []
         for script in self.get(f'/accounts/{self.account}/workers/scripts')['result']:
             sub = self.get(f'/accounts/{self.account}/workers/scripts/{script["id"]}/subdomain')['result']

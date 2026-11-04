@@ -133,6 +133,20 @@ class Run(unittest.TestCase):
         kept = json.loads(dump_state([A], pending_audit=events))['pending_audit']
         self.assertEqual((len(kept), kept[0]['id'], kept[-1]['id']), (500, 'x100', 'x599'))
 
+    def test_new_state_gets_an_epoch_that_events_carry_and_that_persists(self):
+        seen = []
+        run(self.state_in, self.state_out, lambda: ([A], set()), self.sent.append, out=self.out,
+            audit=lambda events: seen.extend(events) or [])
+        epoch = json.loads(self.state_out.read_text())['epoch']
+        self.assertEqual(len(epoch), 16)
+        self.assertEqual(seen[0]['epoch'], epoch)
+        self.state_in.write_text(self.state_out.read_text())
+        self.go(lambda: ([A, B], set()))
+        self.assertEqual(json.loads(self.state_out.read_text())['epoch'], epoch)
+        self.state_in.unlink()  # state lost: a fresh lineage
+        self.go(lambda: ([A], set()))
+        self.assertNotEqual(json.loads(self.state_out.read_text())['epoch'], epoch)
+
     def test_public_output_has_no_hostname(self):  # AC6
         self.go(lambda: ([A, B], set()))
         self.assertNotIn('example.com', self.out.getvalue())

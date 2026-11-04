@@ -10,7 +10,7 @@ from pathlib import Path
 from .audit import AuditSink, service_token
 from .checks import PROBE_RULES, Finding, evaluate
 from .collect import Cloudflare, ProviderError, dangling_cnames, probe_all, web_hosts
-from .report import diff, dump_state, load_meta, load_state, message, public_summary
+from .report import diff, dump_state, load_meta, load_state, message, public_summary, load_epoch
 
 OK, PROVIDER_FAILED, NOTIFY_FAILED = 0, 2, 3
 
@@ -61,11 +61,13 @@ def run(state_in, state_out, findings_fn, send, out=sys.stdout, audit=None):
     previous_text = state_in.read_text() if state_in.exists() else ''
     previous = load_state(previous_text)
     generation, pending_messages, pending_audit = load_meta(previous_text)
+    epoch = load_epoch(previous_text)
     current = carry_forward(previous or {}, current, unknown)
     opened, resolved = diff(previous or {}, current)
 
-    events = pending_audit + [{'change': 'opened', 'id': f.id, 'generation': generation} for f in opened] + \
-        [{'change': 'resolved', 'id': f['id'], 'generation': generation} for f in resolved]
+    new = [('opened', f.id) for f in opened] + [('resolved', f['id']) for f in resolved]
+    events = pending_audit + [{'change': c, 'id': i, 'generation': generation, **({'epoch': epoch} if epoch else {})}
+                              for c, i in new]
     unposted = audit(events) if audit else []
     held = [] if audit else events  # no sink this run (local, --no-audit): keep them for a run that has one
 
@@ -81,7 +83,8 @@ def run(state_in, state_out, findings_fn, send, out=sys.stdout, audit=None):
             unsent = queue[n:]
             break
 
-    state_out.write_text(dump_state(current, generation + 1, pending_messages=unsent, pending_audit=unposted or held))
+    state_out.write_text(dump_state(current, generation + 1, pending_messages=unsent, pending_audit=unposted or held,
+                                     epoch=epoch))
     summary = json.loads(public_summary(current, len(opened), len(resolved)))
     if unposted:
         summary['status'], summary['audit_pending'] = 'audit_failed', len(unposted)

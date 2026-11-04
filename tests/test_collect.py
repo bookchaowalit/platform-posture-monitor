@@ -130,6 +130,19 @@ class Api(unittest.TestCase):  # AC5 at the provider edge
                                         'result_info': {'total_pages': 2}}).encode())
         self.assertEqual(Cloudflare('t', 'acct', 'x.com', opener=opener).paged('/r'), [1, 2, 3])
 
+    def test_reusable_policy_references_are_loaded_in_full(self):
+        full = [{'decision': 'allow', 'include': [{'email': {'email': 'owner@example.com'}}]}]
+        seen = []
+        def opener(req, timeout):
+            seen.append(req.full_url)
+            return FakeResp(json.dumps({'success': True, 'result': full, 'result_info': {'total_pages': 1}}).encode())
+        cf = Cloudflare('t', 'acct', 'x.com', opener=opener)
+        apps = [{'id': 'a1', 'type': 'self_hosted', 'domain': 'vault.x.com', 'policies': [{'id': 'p1', 'name': 'owner'}]},
+                {'id': 'a2', 'type': 'self_hosted', 'domain': 'ok.x.com', 'policies': full}]
+        self.assertEqual(enforcing_domains(cf.full_policies(apps)), ['ok.x.com', 'vault.x.com'])
+        self.assertEqual(len(seen), 1)  # only the app with a reference is fetched
+        self.assertIn('/access/apps/a1/policies', seen[0])
+
 
 if __name__ == '__main__':
     unittest.main()
