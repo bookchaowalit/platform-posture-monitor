@@ -85,26 +85,39 @@ def _limits(policy):
     return any('everyone' not in rule for rule in policy.get('require', []))
 
 
-def _open_to_all(policy):
-    return _everyone(policy) and not policy.get('require')
+def _open(policy):
+    """A rule that lets anyone through: the same test as _limits, so the two never disagree."""
+    return bool(policy.get('include')) and not _limits(policy)
+
+
+CREDENTIAL_RULES = {'service_token', 'any_valid_service_token', 'certificate', 'common_name'}
+
+
+def _needs_credential(policy):
+    """Service Auth counts only when a rule demands a credential; ip/geo/everyone alone do not."""
+    rules = policy.get('include', []) + policy.get('require', [])
+    return any(key in CREDENTIAL_RULES for rule in rules for key in rule)
 
 
 def enforcing_domains(apps):
     """Domains of self-hosted Access apps that actually require a login.
 
-    An app counts only if it has an allow (login) or non_identity (Service Auth) rule limited to
-    someone - by include, or by a require rule when include is `everyone` - and no bypass or
-    non_identity rule that lets everyone through; anything else would hide an open host behind an app.
+    An app counts only if it has an allow (login) rule limited to someone - by include, or by a
+    require rule when include is `everyone` - or a non_identity (Service Auth) rule that demands a
+    credential, and no allow, bypass or non_identity rule that lets everyone through; anything else
+    would hide an open host behind an app.
     """
     domains = []
     for app in apps:
         if app.get('type') != 'self_hosted':
             continue
         policies = app.get('policies', [])
-        if any(p.get('decision') in ('bypass', 'non_identity') and _open_to_all(p) for p in policies):
+        # any rule open to everyone opens the app, whatever the other rules say
+        if any(p.get('decision') in ('allow', 'bypass', 'non_identity') and _open(p) for p in policies):
             continue
-        # allow = a login; non_identity = Service Auth (a service token or mTLS credential)
-        if not any(p.get('decision') in ('allow', 'non_identity') and _limits(p) for p in policies):
+        # allow = a login limited to someone; non_identity = Service Auth with a real credential
+        if not any((p.get('decision') == 'allow' and _limits(p)) or
+                   (p.get('decision') == 'non_identity' and _limits(p) and _needs_credential(p)) for p in policies):
             continue
         domains += [d for d in {app.get('domain'), *app.get('self_hosted_domains', [])} if d]
     return sorted(domains)

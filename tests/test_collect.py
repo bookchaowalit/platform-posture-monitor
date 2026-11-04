@@ -68,6 +68,20 @@ class AccessApps(unittest.TestCase):
         open_service = {'decision': 'non_identity', 'include': [{'everyone': {}}]}
         self.assertEqual(enforcing_domains([self.app([self.OWNER, open_service])]), [])
 
+    def test_one_open_rule_opens_the_app(self):
+        everyone = {'decision': 'allow', 'include': [{'everyone': {}}]}
+        self.assertEqual(enforcing_domains([self.app([self.OWNER, everyone])]), [])
+        everyone_req = {'decision': 'bypass', 'include': [{'everyone': {}}], 'require': [{'everyone': {}}]}
+        self.assertEqual(enforcing_domains([self.app([self.OWNER, everyone_req])]), [])
+
+    def test_service_auth_without_a_credential_does_not_count(self):
+        ip_only = {'decision': 'non_identity', 'include': [{'ip': {'ip': '203.0.113.0/24'}}]}
+        self.assertEqual(enforcing_domains([self.app([ip_only])]), [])
+        geo = {'decision': 'non_identity', 'include': [{'everyone': {}}], 'require': [{'geo': {'country_code': 'TH'}}]}
+        self.assertEqual(enforcing_domains([self.app([geo])]), [])
+        cert = {'decision': 'non_identity', 'include': [{'certificate': {}}]}
+        self.assertEqual(enforcing_domains([self.app([cert])]), ['vault.x.com'])
+
 
 class Doh(unittest.TestCase):
     def status(self, code):
