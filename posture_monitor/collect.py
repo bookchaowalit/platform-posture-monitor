@@ -95,8 +95,12 @@ CREDENTIAL_RULES = {'service_token', 'any_valid_service_token', 'certificate', '
 
 def _needs_credential(policy):
     """Service Auth counts only when a rule demands a credential; ip/geo/everyone alone do not."""
-    rules = policy.get('include', []) + policy.get('require', [])
-    return any(key in CREDENTIAL_RULES for rule in rules for key in rule)
+    # include rules are alternatives (OR): every one must demand a credential, else e.g. an ip
+    # alternative lets callers in without one. A require rule (AND) demanding one is enough.
+    def demands(rule):
+        return any(key in CREDENTIAL_RULES for key in rule)
+    include = policy.get('include', [])
+    return (bool(include) and all(demands(r) for r in include)) or any(demands(r) for r in policy.get('require', []))
 
 
 def enforcing_domains(apps):

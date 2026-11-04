@@ -79,6 +79,12 @@ class AccessApps(unittest.TestCase):
         self.assertEqual(enforcing_domains([self.app([ip_only])]), [])
         geo = {'decision': 'non_identity', 'include': [{'everyone': {}}], 'require': [{'geo': {'country_code': 'TH'}}]}
         self.assertEqual(enforcing_domains([self.app([geo])]), [])
+        ip_or_token = {'decision': 'non_identity',
+                       'include': [{'ip': {'ip': '203.0.113.0/24'}}, {'service_token': {'token_id': 't1'}}]}
+        self.assertEqual(enforcing_domains([self.app([ip_or_token])]), [])  # the ip alternative needs no token
+        ip_and_token = {'decision': 'non_identity', 'include': [{'ip': {'ip': '203.0.113.0/24'}}],
+                        'require': [{'service_token': {'token_id': 't1'}}]}
+        self.assertEqual(enforcing_domains([self.app([ip_and_token])]), ['vault.x.com'])
         cert = {'decision': 'non_identity', 'include': [{'certificate': {}}]}
         self.assertEqual(enforcing_domains([self.app([cert])]), ['vault.x.com'])
 
