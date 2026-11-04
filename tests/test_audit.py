@@ -94,6 +94,16 @@ class Partial(unittest.TestCase):
         events = [{'change': 'opened', 'id': 'r:1', 'generation': 1}]
         self.assertEqual(AuditSink(token=no_token)(events), events)
 
+    def test_signing_failure_keeps_everything(self):
+        events = [{'change': 'opened', 'id': 'r:1', 'generation': 1}]
+        for exc in (subprocess.CalledProcessError(1, ['openssl']), FileNotFoundError('openssl')):
+            def no_sign(exc=exc):
+                raise exc
+            with self.subTest(type(exc).__name__):
+                self.assertEqual(AuditSink(token=no_sign)(events), events)
+        bad = AuditSink(token=lambda: __import__('posture_monitor.audit').audit.service_token('not a pem'))
+        self.assertEqual(bad(events), events)  # real openssl rejects the key: kept, not raised
+
 
 if __name__ == '__main__':
     unittest.main()

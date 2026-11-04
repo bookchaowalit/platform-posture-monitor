@@ -106,7 +106,8 @@ class AuditSink:
             return []
         try:
             token = self.token()
-        except ProviderError:
+        except (ProviderError, subprocess.CalledProcessError, OSError, KeyError):
+            # identity down, or the assertion could not be signed (bad key, no openssl): retry next run
             return list(events)
         for n, event in enumerate(events):
             try:
