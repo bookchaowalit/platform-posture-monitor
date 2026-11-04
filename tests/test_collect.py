@@ -53,6 +53,21 @@ class AccessApps(unittest.TestCase):
         self.assertEqual(enforcing_domains([self.app([])]), [])
         self.assertEqual(enforcing_domains([self.app([self.OWNER], type_='warp')]), [])
 
+    def test_everyone_narrowed_by_require_enforces(self):
+        narrowed = {'decision': 'allow', 'include': [{'everyone': {}}],
+                    'require': [{'email': {'email': 'owner@example.com'}}]}
+        self.assertEqual(enforcing_domains([self.app([narrowed])]), ['vault.x.com'])
+        still_open = {'decision': 'allow', 'include': [{'everyone': {}}], 'require': [{'everyone': {}}]}
+        self.assertEqual(enforcing_domains([self.app([still_open])]), [])
+
+    def test_service_auth_enforces(self):
+        service = {'decision': 'non_identity', 'include': [{'service_token': {'token_id': 't1'}}]}
+        any_token = {'decision': 'non_identity', 'include': [{'any_valid_service_token': {}}]}
+        self.assertEqual(enforcing_domains([self.app([service])]), ['vault.x.com'])
+        self.assertEqual(enforcing_domains([self.app([any_token])]), ['vault.x.com'])
+        open_service = {'decision': 'non_identity', 'include': [{'everyone': {}}]}
+        self.assertEqual(enforcing_domains([self.app([self.OWNER, open_service])]), [])
+
 
 class Doh(unittest.TestCase):
     def status(self, code):

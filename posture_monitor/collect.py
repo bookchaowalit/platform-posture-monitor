@@ -76,20 +76,35 @@ def _everyone(policy):
     return any('everyone' in rule for rule in policy.get('include', []))
 
 
+def _limits(policy):
+    """Does this policy let only some callers in? include narrows it, and so does a require rule."""
+    if not policy.get('include'):
+        return False
+    if not _everyone(policy):
+        return True
+    return any('everyone' not in rule for rule in policy.get('require', []))
+
+
+def _open_to_all(policy):
+    return _everyone(policy) and not policy.get('require')
+
+
 def enforcing_domains(apps):
     """Domains of self-hosted Access apps that actually require a login.
 
-    An app counts only if it has an allow rule limited to someone (not `everyone`) and no bypass
-    rule that lets everyone through; anything else would hide an open host behind an app.
+    An app counts only if it has an allow (login) or non_identity (Service Auth) rule limited to
+    someone - by include, or by a require rule when include is `everyone` - and no bypass or
+    non_identity rule that lets everyone through; anything else would hide an open host behind an app.
     """
     domains = []
     for app in apps:
         if app.get('type') != 'self_hosted':
             continue
         policies = app.get('policies', [])
-        if any(p.get('decision') == 'bypass' and _everyone(p) for p in policies):
+        if any(p.get('decision') in ('bypass', 'non_identity') and _open_to_all(p) for p in policies):
             continue
-        if not any(p.get('decision') == 'allow' and p.get('include') and not _everyone(p) for p in policies):
+        # allow = a login; non_identity = Service Auth (a service token or mTLS credential)
+        if not any(p.get('decision') in ('allow', 'non_identity') and _limits(p) for p in policies):
             continue
         domains += [d for d in {app.get('domain'), *app.get('self_hosted_domains', [])} if d]
     return sorted(domains)
