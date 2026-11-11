@@ -21,7 +21,7 @@ TIMEOUT = 10
 R2_CLASS_B = frozenset({'HeadBucket', 'HeadObject', 'GetObject', 'UsageSummary', 'GetBucketEncryption',
                         'GetBucketLocation', 'GetBucketCors', 'GetBucketLifecycleConfiguration'})
 R2_FREE = frozenset({'DeleteObject', 'DeleteObjects', 'DeleteBucket', 'AbortMultipartUpload'})
-R2_QUERY = '''query($account: String!, $since: Time!, $until: Time!, $recent: Time!) {
+R2_QUERY = '''query($account: string!, $since: Time!, $until: Time!, $recent: Time!) {
   viewer { accounts(filter: {accountTag: $account}) {
     ops: r2OperationsAdaptiveGroups(limit: 10000, filter: {datetime_geq: $since, datetime_leq: $until}) {
       sum { requests } dimensions { actionType } }

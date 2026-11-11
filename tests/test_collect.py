@@ -177,6 +177,7 @@ class R2UsageQuery(unittest.TestCase):  # AC7
         sent = json.loads(opener.call_args.args[0].data)
         self.assertEqual(sent['variables']['account'], 'acc')
         self.assertEqual(sent['variables']['since'], '2026-10-12T13:00:00Z')
+        self.assertIn('$account: string!', sent['query'])  # Cloudflare's accountTag scalar is lowercase
 
     def test_graphql_errors_fail_the_run(self):
         opener = mock.Mock(return_value=self.reply(errors=[{'message': 'not authorized'}]))
