@@ -19,8 +19,10 @@ def live_findings(env):
     cf = Cloudflare(env['CLOUDFLARE_API_TOKEN'], env['CLOUDFLARE_ACCOUNT_ID'],
                     env.get('POSTURE_ZONE', 'bookchaowalit.com'))
     records, access, zone, workers_dev = cf.inventory()
+    now = datetime.now(UTC)
+    r2 = cf.r2_usage(now)
     probes = probe_all(web_hosts(records))
-    found = evaluate(records, access, zone, workers_dev, probes, datetime.now(UTC), dangling_cnames(records))
+    found = evaluate(records, access, zone, workers_dev, probes, now, dangling_cnames(records), r2=r2)
     return found, {host for host, p in probes.items() if not p.reachable}
 
 

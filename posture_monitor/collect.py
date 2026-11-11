@@ -6,9 +6,9 @@ import ssl
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from .checks import Probe, ZoneSettings
+from .checks import Probe, R2Usage, ZoneSettings
 
 API = 'https://api.cloudflare.com/client/v4'
 DOH = 'https://cloudflare-dns.com/dns-query'
@@ -16,6 +16,18 @@ NOERROR, NXDOMAIN = 0, 3
 WEB_TARGETS = ('.vercel-dns.com', '.vercel-dns-017.com', '.up.railway.app', '.cfargotunnel.com',
                '.workers.dev', '.pages.dev')
 TIMEOUT = 10
+# R2 pricing classes by GraphQL actionType. Anything not listed as Class B or free counts as
+# Class A, so a new write action can only make the trigger fire early, never late.
+R2_CLASS_B = frozenset({'HeadBucket', 'HeadObject', 'GetObject', 'UsageSummary', 'GetBucketEncryption',
+                        'GetBucketLocation', 'GetBucketCors', 'GetBucketLifecycleConfiguration'})
+R2_FREE = frozenset({'DeleteObject', 'DeleteObjects', 'DeleteBucket', 'AbortMultipartUpload'})
+R2_QUERY = '''query($account: String!, $since: Time!, $until: Time!, $recent: Time!) {
+  viewer { accounts(filter: {accountTag: $account}) {
+    ops: r2OperationsAdaptiveGroups(limit: 10000, filter: {datetime_geq: $since, datetime_leq: $until}) {
+      sum { requests } dimensions { actionType } }
+    storage: r2StorageAdaptiveGroups(limit: 10000, filter: {datetime_geq: $recent, datetime_leq: $until},
+                                     orderBy: [datetime_DESC]) {
+      max { payloadSize metadataSize } dimensions { bucketName datetime } } } } }'''
 WORKERS = 8
 
 
@@ -37,6 +49,35 @@ class Cloudflare:
         if not body.get('success'):
             raise ProviderError(f'{path.split("?")[0]}: unsuccessful')
         return body
+
+    def r2_usage(self, now):
+        """R2 use over the last 30 days for the ADR-0013 §7 triggers (Account Analytics Read)."""
+        fmt = '%Y-%m-%dT%H:%M:%SZ'
+        variables = {'account': self.account, 'since': (now - timedelta(days=30)).strftime(fmt),
+                     'until': now.strftime(fmt), 'recent': (now - timedelta(days=2)).strftime(fmt)}
+        req = urllib.request.Request(API + '/graphql', data=json.dumps({'query': R2_QUERY, 'variables': variables}).encode(),
+                                     headers={'Authorization': f'Bearer {self.token}', 'Content-Type': 'application/json'})
+        try:
+            with self.open(req, timeout=30) as resp:
+                body = json.load(resp)
+            if body.get('errors'):
+                raise ValueError('graphql errors')
+            acc = body['data']['viewer']['accounts'][0]
+        except Exception as exc:  # noqa: BLE001  only the path and type leave this function
+            raise ProviderError(f'/graphql r2: {type(exc).__name__}') from None
+        class_a = class_b = 0
+        for row in acc['ops']:
+            action, n = row['dimensions']['actionType'], row['sum']['requests']
+            if action in R2_CLASS_B:
+                class_b += n
+            elif action not in R2_FREE:
+                class_a += n
+        newest = {}
+        for row in acc['storage']:
+            bucket, at = row['dimensions']['bucketName'], row['dimensions']['datetime']
+            if bucket not in newest or at > newest[bucket][0]:
+                newest[bucket] = (at, row['max']['payloadSize'] + row['max']['metadataSize'])
+        return R2Usage(storage_bytes=sum(size for _, size in newest.values()), class_a=class_a, class_b=class_b)
 
     def full_policies(self, apps):
         """Apps whose policies are only references (reusable policies, no include) get the full list,

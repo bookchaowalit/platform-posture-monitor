@@ -41,6 +41,9 @@ finding opens or resolves. A missed run alerts through the uptime Worker heartbe
 | `zone-dnssec` | low | DNSSEC is not active |
 | `zone-caa` | low | the apex has no CAA record |
 | `workers-dev` | low | a Worker script has its `workers.dev` route enabled |
+| `r2-class-b` | low | R2 Class B requests over the last 30 days exceed 3 M (ADR-0013 §7: write the compaction job) |
+| `r2-class-a` | low | R2 Class A requests over the last 30 days exceed 300 k (ADR-0013 §7: batch writes) |
+| `r2-storage` | low | newest R2 storage across all buckets exceeds 10 GB (ADR-0013 §7: run the IA cost comparison) |
 
 Out of scope for v1: Neon IP allowlists (the only Neon credential is account-wide with
 write rights, too broad for a public-repo job; NET-05 is an owner decision), response
@@ -84,6 +87,9 @@ retried run never duplicates an event. An audit failure exits 2 and keeps the ol
   unchanged set yields no message.
 - AC5 A provider error leaves the state file untouched and exits with code 2.
 - AC6 The public summary contains no hostname.
+- AC7 R2 usage above an ADR-0013 §7 threshold produces its `r2-*` rule (strictly greater than);
+  at or below every threshold none does. Unknown R2 action types count as Class A; a GraphQL
+  error fails the run like any provider error.
 
 ## Later
 

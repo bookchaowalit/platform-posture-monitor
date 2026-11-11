@@ -1,7 +1,7 @@
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from posture_monitor.checks import Probe, ZoneSettings, evaluate
+from posture_monitor.checks import Probe, R2Usage, ZoneSettings, evaluate
 
 NOW = datetime(2026, 11, 3, tzinfo=UTC)
 GOOD_ZONE = ZoneSettings(ssl='strict', min_tls_version='1.2', always_use_https='on', hsts_enabled=True,
@@ -120,3 +120,23 @@ class Ordering(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class R2CostTriggers(unittest.TestCase):  # AC7, ADR-0013 §7
+    def run_with(self, **kw):
+        usage = R2Usage(**{'storage_bytes': 2 * 10**9, 'class_a': 30_000, 'class_b': 900_000, **kw})
+        return ids(evaluate([], [], GOOD_ZONE, [], {}, NOW, r2=usage))
+
+    def test_below_every_trigger_is_quiet(self):
+        self.assertEqual(self.run_with(), [])
+
+    def test_each_trigger_opens_its_rule(self):
+        self.assertEqual(self.run_with(class_b=3_000_001), ['r2-class-b:account'])
+        self.assertEqual(self.run_with(class_a=300_001), ['r2-class-a:account'])
+        self.assertEqual(self.run_with(storage_bytes=10 * 10**9 + 1), ['r2-storage:account'])
+
+    def test_exact_threshold_does_not_fire(self):
+        self.assertEqual(self.run_with(class_b=3_000_000, class_a=300_000, storage_bytes=10 * 10**9), [])
+
+    def test_no_usage_means_no_r2_rules(self):
+        self.assertEqual(ids(evaluate([], [], GOOD_ZONE, [], {}, NOW)), [])

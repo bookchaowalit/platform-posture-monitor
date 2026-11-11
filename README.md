@@ -62,7 +62,7 @@ All in Infisical `/posture-monitor` and mirrored to this repository's Actions se
 
 | Secret | What |
 |---|---|
-| `CLOUDFLARE_API_TOKEN` | account token `posture-monitor (…)`: Zone, DNS and Zone Settings Read on the zone; Access Apps and Workers Scripts Read on the account; R2 object read/write on bucket `posture-monitor` only |
+| `CLOUDFLARE_API_TOKEN` | account token `posture-monitor (…)`: Zone, DNS and Zone Settings Read on the zone; Access Apps, Workers Scripts and Account Analytics Read on the account (R2 usage for the ADR-0013 §7 rules); R2 object read/write on bucket `posture-monitor` only |
 | `CLOUDFLARE_ACCOUNT_ID` | account id |
 | `POSTURE_R2_ACCESS_KEY_ID`, `POSTURE_R2_SECRET_ACCESS_KEY`, `POSTURE_R2_ENDPOINT` | S3 credentials derived from the same token (id, SHA-256 of the value) |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | infra bot (Infisical `/telegram`) |

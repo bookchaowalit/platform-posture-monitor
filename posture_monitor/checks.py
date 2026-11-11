@@ -6,6 +6,10 @@ from typing import NamedTuple
 SEVERITY_ORDER = {'high': 0, 'medium': 1, 'low': 2}
 EXPIRY_WARNING = timedelta(days=21)  # providers renew at 30 days; under 21 means renewal is failing
 TLS_VERSIONS = ('1.0', '1.1', '1.2', '1.3')
+# ADR-0013 §7 cost triggers over a rolling 30 days; each one reopens the data-platform ADR.
+R2_CLASS_B_LIMIT = 3_000_000       # 30 % of the 10 M free reads: write the compaction job
+R2_CLASS_A_LIMIT = 300_000         # 30 % of the 1 M free writes: batch writes first
+R2_STORAGE_LIMIT = 10 * 1000 ** 3  # past the 10 GB free allowance: run the IA cost comparison
 PROBE_RULES = frozenset({'tls-invalid', 'tls-expiring', 'deployment-missing', 'deployment-paused'})
 
 
@@ -39,6 +43,21 @@ class Probe(NamedTuple):
     status: int | None             # HTTP status of one GET without following redirects
     vercel_error: str | None       # value of the x-vercel-error header
     railway_not_found: bool        # Railway's "Application not found" fallback
+
+
+class R2Usage(NamedTuple):
+    storage_bytes: int  # newest payload + metadata size, summed over all buckets
+    class_a: int        # Class A requests in the last 30 days
+    class_b: int        # Class B requests in the last 30 days
+
+
+def _r2_rules(u):
+    if u.class_b > R2_CLASS_B_LIMIT:
+        yield Finding('r2-class-b', 'low', 'account')
+    if u.class_a > R2_CLASS_A_LIMIT:
+        yield Finding('r2-class-a', 'low', 'account')
+    if u.storage_bytes > R2_STORAGE_LIMIT:
+        yield Finding('r2-storage', 'low', 'account')
 
 
 def access_covers(host, access_domains):
@@ -87,7 +106,7 @@ def _zone_rules(z):
         yield Finding('zone-caa', 'low', 'zone')
 
 
-def evaluate(records, access_domains, zone, workers_dev, probes, now, dangling=()):
+def evaluate(records, access_domains, zone, workers_dev, probes, now, dangling=(), r2=None):
     """All findings for one inventory, highest severity first, then by id."""
     found = list(_tunnel_rules(records, access_domains))
     found.extend(Finding('dangling-target', 'high', name) for name in dangling)
@@ -95,4 +114,6 @@ def evaluate(records, access_domains, zone, workers_dev, probes, now, dangling=(
         found.extend(_probe_rules(host, probe, now))
     found.extend(_zone_rules(zone))
     found.extend(Finding('workers-dev', 'low', name) for name in workers_dev)
+    if r2 is not None:
+        found.extend(_r2_rules(r2))
     return sorted(set(found), key=lambda f: (SEVERITY_ORDER[f.severity], f.id))

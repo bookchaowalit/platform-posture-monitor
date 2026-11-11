@@ -1,8 +1,10 @@
 import io
 import json
 import unittest
+from datetime import UTC, datetime
 from unittest import mock
 
+from posture_monitor.checks import R2Usage
 from posture_monitor.collect import (
     Cloudflare,
     ProviderError,
@@ -146,3 +148,42 @@ class Api(unittest.TestCase):  # AC5 at the provider edge
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class R2UsageQuery(unittest.TestCase):  # AC7
+    NOW = datetime(2026, 11, 11, 13, 0, tzinfo=UTC)
+
+    def reply(self, data=None, errors=None):
+        body = {'data': data, 'errors': errors}
+        resp = mock.MagicMock()
+        resp.__enter__.return_value = io.BytesIO(json.dumps(body).encode())
+        return resp
+
+    def test_sums_classes_and_takes_newest_storage_per_bucket(self):
+        acc = {'ops': [{'sum': {'requests': 500}, 'dimensions': {'actionType': 'GetObject'}},
+                       {'sum': {'requests': 100}, 'dimensions': {'actionType': 'HeadObject'}},
+                       {'sum': {'requests': 40}, 'dimensions': {'actionType': 'PutObject'}},
+                       {'sum': {'requests': 7}, 'dimensions': {'actionType': 'SomeNewWrite'}},
+                       {'sum': {'requests': 9}, 'dimensions': {'actionType': 'DeleteObject'}}],
+               'storage': [{'max': {'payloadSize': 900, 'metadataSize': 100},
+                            'dimensions': {'bucketName': 'a', 'datetime': '2026-11-11T12:50:00Z'}},
+                           {'max': {'payloadSize': 5, 'metadataSize': 0},
+                            'dimensions': {'bucketName': 'a', 'datetime': '2026-11-10T12:50:00Z'}},
+                           {'max': {'payloadSize': 20, 'metadataSize': 0},
+                            'dimensions': {'bucketName': 'b', 'datetime': '2026-11-11T12:40:00Z'}}]}
+        opener = mock.Mock(return_value=self.reply({'viewer': {'accounts': [acc]}}))
+        usage = Cloudflare('t', 'acc', 'x.com', opener=opener).r2_usage(self.NOW)
+        self.assertEqual(usage, R2Usage(storage_bytes=1020, class_a=47, class_b=600))
+        sent = json.loads(opener.call_args.args[0].data)
+        self.assertEqual(sent['variables']['account'], 'acc')
+        self.assertEqual(sent['variables']['since'], '2026-10-12T13:00:00Z')
+
+    def test_graphql_errors_fail_the_run(self):
+        opener = mock.Mock(return_value=self.reply(errors=[{'message': 'not authorized'}]))
+        with self.assertRaises(ProviderError):
+            Cloudflare('t', 'acc', 'x.com', opener=opener).r2_usage(self.NOW)
+
+    def test_network_error_fails_the_run(self):
+        opener = mock.Mock(side_effect=OSError('down'))
+        with self.assertRaises(ProviderError):
+            Cloudflare('t', 'acc', 'x.com', opener=opener).r2_usage(self.NOW)
