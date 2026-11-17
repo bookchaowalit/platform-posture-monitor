@@ -34,7 +34,7 @@ is not a posture finding; the uptime Worker covers availability.
 
 ## How it runs
 
-- `.github/workflows/posture.yml`, cron `23 */6 * * *` and manual dispatch, GitHub-hosted
+- `.github/workflows/posture.yml`, dispatched every 6 h at :23 UTC by platform-jobs-worker (job `posture-monitor`, since 2026-11-17) and manually, GitHub-hosted
   runner (public repository). The log prints only counts per severity.
 - State: `state.json` in the private R2 bucket `posture-monitor`. A failed inventory never
   replaces it, so a provider outage never "resolves" findings.

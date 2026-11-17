@@ -1,4 +1,4 @@
-# Security posture monitor (docs/specs/001-posture-monitor.md): every 6 h, rebuild the edge
+# Security posture monitor (docs/specs/001-posture-monitor.md): every 6 h (jobs queue), rebuild the edge
 # inventory from Cloudflare plus one HTTPS GET per web hostname, diff it with the previous run
 # and send a Telegram message only when a finding opens or resolves.
 #
@@ -9,8 +9,8 @@
 name: Posture monitor
 
 on:
-  schedule:
-    - cron: "23 */6 * * *"
+  # Scheduled by platform-jobs-worker job `posture-monitor` (every 6 h at :23 UTC) since 2026-11-17:
+  # GitHub dropped two schedule runs in a row on 2026-11-16 (15.5 h gap, heartbeat 13 h).
   workflow_dispatch:
 
 permissions:
